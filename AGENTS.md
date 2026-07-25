@@ -24,7 +24,8 @@ webbasedrtstest/
 ├── style.css             # Global styles (menu, HUD, overlays)
 ├── server.js             # Static file server + WebSocket relay
 ├── package.json          # Dependencies: ws
-├── AGENTS.md             # ← this file
+├── AGENTS.md             # ← this file (read first)
+├── TODO.md               # Kanban board — track all tasks here
 ├── docs/
 │   ├── architecture.md   # Architecture overview & decisions
 │   └── design-decisions.md # Design rationale & tradeoffs
@@ -88,3 +89,42 @@ Messages are JSON with a `type` field:
 - New faction data → `js/factions/`
 - New UI panels → `js/ui/`
 - Network message changes → update both `js/network/` and `server.js`, and document in this file's table above
+
+## TODO.md — Kanban Board Rules
+
+**`TODO.md` is the single source of truth for project tasks.** All AI agents MUST follow these rules:
+
+### Before starting any work
+
+1. **Read `TODO.md`** to check whether the task is already tracked.
+2. If the task matches an existing item, move it from **Backlog** → **In Progress** (change `- [ ]` to `- [ ] **In Progress:** ...` or add a note).
+3. If the task is not listed, add it to the appropriate priority column in **Backlog** before beginning.
+
+### While working
+
+4. When a task is **substantially complete**, move it from **In Progress** → **Done** by adding `[x]` and a brief summary of what was changed (files touched, key changes).
+5. If a task reveals **new sub-tasks or blockers**, add them to **Backlog** or **Blocked** immediately.
+6. If a task **uncovers a bug**, add it to **Backlog → Bugs** section with a `🔴` marker.
+
+### When finishing
+
+7. Always leave `TODO.md` in a consistent state — no orphaned items in **In Progress** for work that is complete.
+8. Keep the **Done** column as a historical log — do not delete completed items.
+
+### Priority markers
+
+| Marker | Use when…                              |
+|--------|----------------------------------------|
+| `🔴`   | Bug that breaks existing functionality |
+| `🟠`   | Important feature or fix affecting core gameplay |
+| `🟡`   | Polish, improvement, or secondary feature |
+| `🟢`   | Nice-to-have, future consideration     |
+| `🔒`   | Blocked on another task (note the dependency) |
+
+### Task entry format
+
+```
+- [ ] **Title** — One-sentence description. `relevant/file.js`, `other/file.js`
+```
+
+Always include the files you expect to touch. This lets the next agent (or human) know where to look.
