@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frontier Uprising</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Main Menu Overlay -->
+  <div id="main-menu">
+    <h1 class="game-title">FRONTIER UPRISING</h1>
+    <p class="game-subtitle">A Real-Time Strategy Game</p>
+    <div class="menu-buttons">
+      <button id="btn-skirmish" class="menu-btn">Skirmish vs CPU</button>
+      <button id="btn-host" class="menu-btn">Host LAN Game</button>
+      <button id="btn-join" class="menu-btn">Join LAN Game</button>
+    </div>
+    <div id="join-panel" class="join-panel hidden">
+      <label for="host-ip">Host IP Address:</label>
+      <input type="text" id="host-ip" placeholder="e.g. 192.168.1.100:8181">
+      <button id="btn-connect" class="menu-btn small">Connect</button>
+    </div>
+  </div>
+
+  <!-- HUD Overlay (hidden until game starts) -->
+  <div id="hud" class="hud hidden">
+    <div id="resource-bar">
+      <span id="diamond-count">💎 0</span>
+      <span id="biogas-count">⚡ 0</span>
+    </div>
+    <div id="minimap-container"></div>
+    <div id="build-menu"></div>
+    <div id="unit-info"></div>
+  </div>
+
+  <!-- Victory/Defeat Screen -->
+  <div id="game-over" class="game-over hidden">
+    <h2 id="game-over-title"></h2>
+    <button id="btn-menu" class="menu-btn">Return to Menu</button>
+  </div>
+
+  <!-- Three.js Canvas Container -->
+  <div id="game-canvas"></div>
+
+  <!-- Load Three.js from CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
