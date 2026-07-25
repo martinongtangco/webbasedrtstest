@@ -126,25 +126,6 @@ export class Building {
     return false;
   }
 
-  updateProduction(dt) {
-    if (this.productionQueue.length === 0) return null;
-    this.productionTimer += dt;
-    const currentType = this.productionQueue[0];
-    const buildTime = this.getBuildTime(currentType);
-
-    if (this.productionTimer >= buildTime) {
-      this.productionTimer = 0;
-      const unitType = this.productionQueue.shift();
-      return unitType; // Unit ready to spawn
-    }
-    return null;
-  }
-
-  getBuildTime(unitType) {
-    // Default: 3 seconds, overridden by faction def
-    return 3;
-  }
-
   syncMesh() {
     if (this.mesh) {
       this.mesh.position.set(this.x, 0, this.z);

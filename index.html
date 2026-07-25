@@ -12,7 +12,13 @@
     <h1 class="game-title">FRONTIER UPRISING</h1>
     <p class="game-subtitle">A Real-Time Strategy Game</p>
     <div class="menu-buttons">
-      <button id="btn-skirmish" class="menu-btn">Skirmish vs CPU</button>
+      <h2 class="faction-select-label">Choose Your Faction</h2>
+      <div class="faction-buttons">
+        <button id="btn-faction-dogs" class="faction-btn" data-faction="dogs">🐕 K9 Corps</button>
+        <button id="btn-faction-cats" class="faction-btn" data-faction="cats">🐈 Feline Vanguard</button>
+        <button id="btn-faction-fish" class="faction-btn" data-faction="fish">🐟 Abyssal Trident</button>
+      </div>
+      <button id="btn-skirmish" class="menu-btn" disabled>Skirmish vs CPU</button>
       <button id="btn-host" class="menu-btn">Host LAN Game</button>
       <button id="btn-join" class="menu-btn">Join LAN Game</button>
     </div>

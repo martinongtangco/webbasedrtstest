@@ -54,8 +54,45 @@ body {
   font-size: 1rem;
   letter-spacing: 0.5em;
   color: #667;
-  margin-bottom: 3rem;
+  margin-bottom: 2rem;
   text-transform: uppercase;
+}
+
+.faction-select-label {
+  font-size: 0.9rem;
+  letter-spacing: 0.3em;
+  color: #889;
+  text-transform: uppercase;
+  margin-bottom: 0.8rem;
+}
+
+.faction-buttons {
+  display: flex;
+  gap: 0.8rem;
+  margin-bottom: 1.5rem;
+}
+
+.faction-btn {
+  padding: 10px 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #ccc;
+  background: linear-gradient(180deg, #1a1a2e 0%, #0e0e1a 100%);
+  border: 2px solid #2a2a4a;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.faction-btn:hover {
+  border-color: #5a5a8a;
+  color: #fff;
+}
+
+.faction-btn.selected {
+  border-color: #00d4ff;
+  color: #00d4ff;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.3);
 }
 
 .menu-buttons {

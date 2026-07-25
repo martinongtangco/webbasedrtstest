@@ -7,10 +7,13 @@ import { Unit, resetUnitIds } from './entities/units.js';
 import { Building, resetBuildingIds } from './entities/buildings.js';
 import { ResourceNode, generateResources, resetResourceIds } from './entities/resources.js';
 import { FACTION_DOGS } from './factions/dogs.js';
+import { FACTION_CATS } from './factions/cats.js';
+import { FACTION_FISH } from './factions/fish.js';
 import { SkirmishAI } from './ai/skirmishAI.js';
 import { HUD } from './ui/hud.js';
 import { SFX } from './audio/sfx.js';
 import { Music } from './audio/music.js';
+import { NetworkClient } from './network/client.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 const MAP_SIZE = 96;
@@ -34,11 +37,26 @@ let pathGrid = { blocked: new Set(), width: MAP_SIZE, height: MAP_SIZE };
 let playerDiamonds = 300;
 let playerBiogas = 0;
 let playerFaction = FACTION_DOGS;
+let playerFactionKey = 'dogs';
 let selectedBuilding = null;
+
+// Faction registry
+const FACTIONS = {
+  dogs: FACTION_DOGS,
+  cats: FACTION_CATS,
+  fish: FACTION_FISH
+};
+
+/** Resolve a faction key to its definition */
+function getFaction(key) {
+  return FACTIONS[key] || FACTION_DOGS;
+}
 
 // Systems
 let hud, sfx, music, ai;
 let fogPlayer, fogEnemy;
+let net = null;         // NetworkClient instance
+let netWaiting = false; // true when waiting for guest to join (host mode)
 
 // Selection overlay
 let selectionCanvas, selectionCtx;
@@ -58,6 +76,7 @@ const btnConnect = document.getElementById('btn-connect');
 const btnMenu = document.getElementById('btn-menu');
 const joinPanel = document.getElementById('join-panel');
 const hostIpInput = document.getElementById('host-ip');
+const factionButtons = document.querySelectorAll('.faction-btn');
 
 // ── Init ───────────────────────────────────────────────────────────────
 function init() {
@@ -97,6 +116,9 @@ function init() {
 
   // Minimap click → jump camera
   window.addEventListener('minimap_click', onMinimapClick);
+
+  // Harvester deposited resources
+  window.addEventListener('resource_deposited', onResourceDeposited);
 
   // Init audio
   sfx = new SFX();
@@ -162,6 +184,17 @@ function createGround() {
 
 // ── Menu ───────────────────────────────────────────────────────────────
 function setupMenuEvents() {
+  // Faction selection
+  factionButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      factionButtons.forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      playerFaction = getFaction(btn.dataset.faction);
+      playerFactionKey = btn.dataset.faction;
+      btnSkirmish.disabled = false;
+    });
+  });
+
   btnSkirmish.addEventListener('click', () => startGame('skirmish'));
   btnHost.addEventListener('click', () => startGame('host'));
   btnJoin.addEventListener('click', () => joinPanel.classList.toggle('hidden'));
@@ -180,7 +213,6 @@ function startGame(mode, opts = {}) {
   music.start();
 
   gameMode = mode;
-  gameState = 'playing';
   mainMenuEl.classList.add('hidden');
   hudEl.classList.remove('hidden');
   joinPanel.classList.add('hidden');
@@ -192,6 +224,7 @@ function startGame(mode, opts = {}) {
   playerDiamonds = 300;
   playerBiogas = 0;
   selectedBuilding = null;
+  ai = null;
 
   // HUD
   hud = new HUD();
@@ -213,34 +246,147 @@ function startGame(mode, opts = {}) {
   // Place player base (team 0) — bottom-left quadrant
   const playerBaseX = -WORLD_HALF + 60;
   const playerBaseZ = WORLD_HALF - 60;
-  spawnBuilding('command_center', 'dogs', playerBaseX, playerBaseZ, 0);
+  spawnBuilding('command_center', playerFactionKey, playerBaseX, playerBaseZ, 0);
 
   // Place enemy base (team 1) — top-right quadrant
   const enemyBaseX = WORLD_HALF - 60;
   const enemyBaseZ = -WORLD_HALF + 60;
-  spawnBuilding('command_center', 'dogs', enemyBaseX, enemyBaseZ, 1);
+  spawnBuilding('command_center', playerFactionKey, enemyBaseX, enemyBaseZ, 1);
 
   // Center camera on player base
   camera.setLookTarget(new THREE.Vector3(playerBaseX, 0, playerBaseZ));
 
-  // AI
+  // ── Mode-specific setup ──
   if (mode === 'skirmish') {
+    gameState = 'playing';
     ai = new SkirmishAI({
       units, buildings, resources, tileSize: TILE_SIZE, worldHalfSize: WORLD_HALF, fog: fogEnemy
     });
+    spawnInitialHarvesters();
+  } else if (mode === 'host') {
+    gameState = 'waiting'; // wait for guest to join
+    netWaiting = true;
+    // Host gets AI for enemy team (team 1) — guest replaces AI control when connected
+    ai = new SkirmishAI({
+      units, buildings, resources, tileSize: TILE_SIZE, worldHalfSize: WORLD_HALF, fog: fogEnemy
+    });
+    net = new NetworkClient('host', {
+      onGuestConnected: () => {
+        netWaiting = false;
+        gameState = 'playing';
+        spawnInitialHarvesters();
+      },
+      onOpponentLeft: () => {
+        endGame(false);
+      },
+      onError: (msg) => {
+        console.warn('[Net]', msg);
+      }
+    });
+    net.connectHost();
+  } else if (mode === 'guest') {
+    gameState = 'waiting';
+    netWaiting = true;
+    net = new NetworkClient('guest', {
+      onOpponentLeft: () => {
+        if (gameState === 'playing') endGame(false);
+      },
+      onGameState: (state) => {
+        if (gameState === 'waiting') {
+          gameState = 'playing';
+          netWaiting = false;
+        }
+        applyRemoteState(state);
+      },
+      onError: (msg) => {
+        console.warn('[Net]', msg);
+        netWaiting = false;
+        gameState = 'menu';
+        returnToMenu();
+      }
+    });
+    net.connectGuest(opts.hostIp || 'localhost:8181');
   }
+}
 
-  // Spawn initial harvesters
+/** Spawn initial harvesters for team 0 */
+function spawnInitialHarvesters() {
   setTimeout(() => {
     const cc = buildings.find(b => b.team === 0 && b.type === 'command_center' && b.alive);
-    if (cc) spawnUnit('harvester', 'dogs', cc.x + 8, cc.z + 5, 0);
+    if (cc) spawnUnit('harvester', playerFactionKey, cc.x + 8, cc.z + 5, 0);
     setTimeout(() => {
-      if (cc && cc.alive) spawnUnit('harvester', 'dogs', cc.x + 8, cc.z - 5, 0);
+      if (cc && cc.alive) spawnUnit('harvester', playerFactionKey, cc.x + 8, cc.z - 5, 0);
     }, 1000);
   }, 500);
 }
 
+/** Apply a game state received from the host (guest mode) */
+function applyRemoteState(state) {
+  // Rebuild units from host state
+  const remoteUnits = state.units || [];
+  const remoteBuildings = state.buildings || [];
+  const remoteResources = state.resources || [];
+
+  // Update player resources
+  playerDiamonds = state.playerDiamonds ?? playerDiamonds;
+  playerBiogas = state.playerBiogas ?? playerBiogas;
+
+  // Sync units
+  for (const ru of remoteUnits) {
+    let u = units.find(u => u.id === ru.id);
+    if (!u) {
+      u = spawnUnit(ru.type, ru.faction, ru.x, ru.z, ru.team);
+      if (u) {
+        u.id = ru.id;
+        u.setStats(u.type === 'harvester' ? { hp: ru.hp, damage: ru.damage, speed: ru.speed } : { hp: ru.maxHp, damage: ru.damage, speed: ru.speed });
+        u.maxHp = ru.maxHp;
+        u.hp = ru.hp;
+      }
+    } else {
+      u.x = ru.x; u.z = ru.z;
+      u.hp = ru.hp; u.maxHp = ru.maxHp;
+      u.alive = ru.alive;
+      u.selected = false;
+    }
+  }
+  // Remove units no longer on server
+  for (const u of units) {
+    if (!remoteUnits.find(ru => ru.id === u.id) && u.alive) {
+      u.alive = false;
+      u.deathTimer = 0;
+    }
+  }
+
+  // Sync buildings
+  for (const rb of remoteBuildings) {
+    let b = buildings.find(b => b.id === rb.id);
+    if (!b) {
+      b = spawnBuilding(rb.type, rb.faction, rb.x, rb.z, rb.team);
+      if (b) {
+        b.id = rb.id;
+        b.hp = rb.hp; b.maxHp = rb.maxHp;
+      }
+    } else {
+      b.hp = rb.hp; b.maxHp = rb.maxHp;
+      b.alive = rb.alive;
+    }
+  }
+
+  // Sync resources
+  for (const rr of remoteResources) {
+    let r = resources.find(r => r.id === rr.id);
+    if (r) {
+      r.amount = rr.amount;
+      r.alive = rr.amount > 0;
+    }
+  }
+}
+
 function returnToMenu() {
+  // Disconnect network
+  if (net) { net.disconnect(); net = null; }
+  netWaiting = false;
+
   gameState = 'menu';
   gameMode = null;
   mainMenuEl.classList.remove('hidden');
@@ -256,10 +402,28 @@ function returnToMenu() {
   for (const p of particles) if (p.mesh) scene.remove(p.mesh);
   units = []; buildings = []; resources = []; particles = [];
 
+  // Reset faction UI
+  factionButtons.forEach(b => b.classList.remove('selected'));
+  btnSkirmish.disabled = true;
+
+  // Clean up input listeners to avoid accumulation across sessions
+  input.dispose();
+  camera = new IsometricCamera(scene, window.innerWidth, window.innerHeight, {
+    initialDistance: 220, pitchAngle: THREE.MathUtils.degToRad(50),
+    yawAngle: THREE.MathUtils.degToRad(-45), minZoom: 70, maxZoom: 400
+  });
+  camera.setLookTarget(new THREE.Vector3(0, 0, 0));
+  scene.add(camera.camera);
+  input = new InputManager(renderer, camera);
+
   camera.setLookTarget(new THREE.Vector3(0, 0, 0));
 }
 
 function endGame(victory) {
+  // Disconnect network
+  if (net) { net.disconnect(); net = null; }
+  netWaiting = false;
+
   gameState = 'gameover';
   gameOverEl.classList.remove('hidden');
   gameOverEl.classList.add(victory ? 'victory' : 'defeat');
@@ -269,8 +433,7 @@ function endGame(victory) {
 
 // ── Spawning ───────────────────────────────────────────────────────────
 function spawnUnit(type, faction, x, z, team) {
-  const factionKey = faction;
-  const factionDef = factionKey === 'dogs' ? FACTION_DOGS : FACTION_DOGS;
+  const factionDef = getFaction(faction);
   const unitDef = factionDef.units[type];
   if (!unitDef) return null;
 
@@ -284,7 +447,7 @@ function spawnUnit(type, faction, x, z, team) {
 }
 
 function spawnBuilding(type, faction, x, z, team) {
-  const factionDef = faction === 'dogs' ? FACTION_DOGS : FACTION_DOGS;
+  const factionDef = getFaction(faction);
   const buildDef = factionDef.buildings[type];
 
   const building = new Building(type, faction, x, z, team);
@@ -349,6 +512,20 @@ function handleInput() {
   const leftClick = input.getLeftClick();
   const rightClick = input.getRightClick();
   const selBox = input.getSelectionBox();
+
+  // Guest mode: forward all input to host
+  if (gameMode === 'guest' && net && net.connected) {
+    if (leftClick && leftClick.world) {
+      net.sendInput({ action: 'select', x: leftClick.world.x, z: leftClick.world.z });
+    }
+    if (selBox) {
+      net.sendInput({ action: 'box_select', minX: selBox.min.x, minZ: selBox.min.z, maxX: selBox.max.x, maxZ: selBox.max.z });
+    }
+    if (rightClick && rightClick.world) {
+      net.sendInput({ action: 'command', x: rightClick.world.x, z: rightClick.world.z });
+    }
+    // Still process locally for visual feedback
+  }
 
   // Left click / box select
   if (leftClick && leftClick.world) {
@@ -473,7 +650,7 @@ function update(dt, time) {
     }
 
     u.updateMovement(dt, pathGrid, TILE_SIZE, WORLD_HALF);
-    u.updateCombat(dt, units);
+    u.updateCombat(dt, units, pathGrid, TILE_SIZE, WORLD_HALF);
     u.updateAutoAttack(dt, units);
     u.updateGathering(dt, TILE_SIZE, WORLD_HALF);
     u.updateHealthBar();
@@ -531,8 +708,8 @@ function update(dt, time) {
     else fogEnemy.reveal(g.x, g.y, sightTiles);
   }
 
-  // AI
-  if (ai && gameMode === 'skirmish') {
+  // AI (only in skirmish; host mode uses a simple AI for the enemy team too)
+  if (ai && (gameMode === 'skirmish' || gameMode === 'host')) {
     ai.update(dt, {
       units, buildings, resources, pathGrid,
       spawnBuilding: (type, faction, x, z, team) => spawnBuilding(type, faction, x, z, team)
@@ -543,10 +720,37 @@ function update(dt, time) {
   const playerCC = buildings.filter(b => b.team === 0 && b.type === 'command_center' && b.alive);
   const enemyCC = buildings.filter(b => b.team === 1 && b.type === 'command_center' && b.alive);
   if (playerCC.length === 0 && gameState === 'playing') endGame(false);
-  else if (enemyCC.length === 0 && gameState === 'playing' && gameMode === 'skirmish') endGame(true);
+  else if (enemyCC.length === 0 && gameState === 'playing') endGame(gameMode !== 'guest');
+
+  // Host: broadcast game state to guest
+  if (net && gameMode === 'host' && net.connected) {
+    net.sendGameState({
+      playerDiamonds,
+      playerBiogas,
+      units: units.map(u => ({
+        id: u.id, type: u.type, faction: u.faction,
+        x: u.x, z: u.z, team: u.team,
+        hp: u.hp, maxHp: u.maxHp, alive: u.alive
+      })),
+      buildings: buildings.map(b => ({
+        id: b.id, type: b.type, faction: b.faction,
+        x: b.x, z: b.z, team: b.team,
+        hp: b.hp, maxHp: b.maxHp, alive: b.alive
+      })),
+      resources: resources.map(r => ({
+        id: r.id, amount: r.amount, alive: r.alive
+      }))
+    });
+  }
 
   // Player resources (from harvesters depositing)
   // Already handled in unit.gathering → homeBuilding.diamonds
+
+  // Biogas production from gas mining buildings
+  const playerGasMiners = buildings.filter(b => b.team === 0 && b.type === 'gas_mining' && b.alive);
+  if (playerGasMiners.length > 0) {
+    playerBiogas += playerGasMiners.length * dt * 2;
+  }
 
   // HUD update
   hud.updateResources(playerDiamonds, playerBiogas);
@@ -560,7 +764,12 @@ function update(dt, time) {
 }
 
 // ── Minimap Click → Camera Jump ────────────────────────────────────────
+function onResourceDeposited(e) {
+  playerDiamonds += e.detail.amount;
+}
+
 function onMinimapClick(e) {
+
   const { x, z } = e.detail;
   camera.setLookTarget(new THREE.Vector3(x, 0, z));
 }

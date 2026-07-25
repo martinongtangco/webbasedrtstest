@@ -57,6 +57,11 @@ export class Unit {
     // Auto-attack
     this.autoAttackTimer = 0;
     this.autoAttackInterval = 0.5;
+
+    // Combat pathfinding
+    this.combatPath = null;
+    this.combatPathIdx = 0;
+    this.combatPathTimer = 0;
   }
 
   /**
@@ -282,8 +287,13 @@ export class Unit {
 
   /**
    * Update combat for this frame
+   * @param {number} dt
+   * @param {Unit[]} allUnits
+   * @param {object} grid - pathfinding grid (needed for path-based combat approach)
+   * @param {number} tileSize
+   * @param {number} worldHalfSize
    */
-  updateCombat(dt, allUnits) {
+  updateCombat(dt, allUnits, grid, tileSize, worldHalfSize) {
     this.attackTimer -= dt;
     this.muzzleFlashTimer -= dt;
 
@@ -322,11 +332,45 @@ export class Unit {
         this.muzzleFlashTimer = 0.15;
       }
     } else {
-      // Move toward target
-      const moveStep = this.speed * dt;
-      if (dist > moveStep) {
-        this.x += (dx / dist) * moveStep;
-        this.z += (dz / dist) * moveStep;
+      // Use pathfinding to approach target (re-path periodically)
+      if (!this.combatPath || this.combatPathTimer <= 0) {
+        this.combatPathTimer = 0.5; // re-path every 0.5s
+        const start = worldToGrid(this.x, this.z, tileSize, worldHalfSize);
+        const goal = worldToGrid(this.attackTarget.x, this.attackTarget.z, tileSize, worldHalfSize);
+        const path = astar(grid, start, goal);
+        if (path && path.length > 1) {
+          this.combatPath = path;
+          this.combatPathIdx = 0;
+        } else {
+          this.combatPath = null; // fall back to direct movement
+        }
+      }
+      this.combatPathTimer -= dt;
+
+      if (this.combatPath && this.combatPath.length > 1) {
+        // Follow combat path
+        const idx = Math.min(this.combatPathIdx, this.combatPath.length - 1);
+        const next = this.combatPath[idx + 1];
+        const targetWorld = gridToWorld(next.x, next.y, tileSize, worldHalfSize);
+        const pdx = targetWorld.x - this.x;
+        const pdz = targetWorld.z - this.z;
+        const pDist = Math.sqrt(pdx * pdx + pdz * pdz);
+        const moveStep = this.speed * dt;
+        if (pDist < moveStep) {
+          this.x = targetWorld.x;
+          this.z = targetWorld.z;
+          this.combatPathIdx++;
+        } else {
+          this.x += (pdx / pDist) * moveStep;
+          this.z += (pdz / pDist) * moveStep;
+        }
+      } else {
+        // Direct movement fallback (when pathfinding fails)
+        const moveStep = this.speed * dt;
+        if (dist > moveStep) {
+          this.x += (dx / dist) * moveStep;
+          this.z += (dz / dist) * moveStep;
+        }
       }
     }
   }
@@ -404,6 +448,7 @@ export class Unit {
       } else {
         // At home — deposit
         this.homeBuilding.diamonds += this.carrying;
+        window.dispatchEvent(new CustomEvent('resource_deposited', { detail: { amount: this.carrying } }));
         this.carrying = 0;
         if (this.gatherTarget && this.gatherTarget.alive) {
           this.state = 'gathering';

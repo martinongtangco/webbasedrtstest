@@ -88,7 +88,10 @@ export class SkirmishAI {
     }
     const existing = this.buildings.some(b => b.type === 'gas_mining' && b.alive && Math.abs(b.x - nearest.x) < 8 && Math.abs(b.z - nearest.z) < 8);
     if (existing) { this.hasGasMining = true; return; }
-    game.spawnBuilding('gas_mining', this.buildings[0].faction, nearest.x, nearest.z, this.team);
+    // Offset from the gas vent so the building doesn't spawn on top of it
+    const offX = (cc.x < nearest.x) ? -6 : 6;
+    const offZ = (cc.z < nearest.z) ? -6 : 6;
+    game.spawnBuilding('gas_mining', this.buildings[0].faction, nearest.x + offX, nearest.z + offZ, this.team);
     this.hasGasMining = true;
   }
 

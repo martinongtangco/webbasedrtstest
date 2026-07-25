@@ -5,6 +5,56 @@
  * Returns array of grid coords [{x, y}, ...] from start to goal, or null if unreachable.
  */
 
+// ── Binary Min-Heap ────────────────────────────────────────────────────────
+
+class MinHeap {
+  constructor() { this.data = []; }
+
+  get size() { return this.data.length; }
+  get isEmpty() { return this.data.length === 0; }
+
+  push(val, priority) {
+    this.data.push({ val, priority });
+    this._bubbleUp(this.data.length - 1);
+  }
+
+  pop() {
+    const top = this.data[0];
+    const last = this.data.pop();
+    if (this.data.length > 0) {
+      this.data[0] = last;
+      this._sinkDown(0);
+    }
+    return top;
+  }
+
+  has(key) {
+    return this.data.some(item => item.val.key === key);
+  }
+
+  _bubbleUp(i) {
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.data[parent].priority <= this.data[i].priority) break;
+      [this.data[parent], this.data[i]] = [this.data[i], this.data[parent]];
+      i = parent;
+    }
+  }
+
+  _sinkDown(i) {
+    const n = this.data.length;
+    while (true) {
+      let smallest = i;
+      const left = 2 * i + 1, right = 2 * i + 2;
+      if (left < n && this.data[left].priority < this.data[smallest].priority) smallest = left;
+      if (right < n && this.data[right].priority < this.data[smallest].priority) smallest = right;
+      if (smallest === i) break;
+      [this.data[smallest], this.data[i]] = [this.data[i], this.data[smallest]];
+      i = smallest;
+    }
+  }
+}
+
 /**
  * @param {{blocked: Set<string>, width: number, height: number}} grid
  * @param {{x: number, y: number}} start
@@ -32,27 +82,16 @@ export function astar(grid, start, goal, opts = {}) {
         [1, 0]
       ];
 
-  const dirCosts = allowDiagonal
-    ? [[1.414], [1], [1.414], [1], [1], [1.414], [1], [1.414]]
-    : [[1], [1], [1], [1]];
-
-  const openList = [];       // min-heap by f
+  const openList = new MinHeap();
   const cameFrom = new Map();
   const gScore = new Map();
   const closedSet = new Set();
 
   gScore.set(startKey, 0);
+  openList.push({ key: startKey }, heuristic(start, goal));
 
-  // Simple array as heap (push + sort is fine for small grids)
-  openList.push({ key: startKey, f: heuristic(start, goal) });
-
-  while (openList.length > 0) {
-    // Find lowest f in openList
-    let lowestIdx = 0;
-    for (let i = 1; i < openList.length; i++) {
-      if (openList[i].f < openList[lowestIdx].f) lowestIdx = i;
-    }
-    const current = openList.splice(lowestIdx, 1)[0];
+  while (!openList.isEmpty) {
+    const current = openList.pop().val;
 
     if (current.key === goalKey) {
       // Reconstruct path
@@ -64,8 +103,7 @@ export function astar(grid, start, goal, opts = {}) {
 
     const [cx, cy] = current.key.split(',').map(Number);
 
-    for (let i = 0; i < dirs.length; i++) {
-      const [dx, dy] = dirs[i];
+    for (const [dx, dy] of dirs) {
       const nx = cx + dx;
       const ny = cy + dy;
 
@@ -75,14 +113,14 @@ export function astar(grid, start, goal, opts = {}) {
       if (grid.blocked.has(neighborKey)) continue;
       if (closedSet.has(neighborKey)) continue;
 
-      const moveCost = allowDiagonal ? (dx !== 0 && dy !== 0 ? 1.414 : 1) : 1;
+      const moveCost = allowDiagonal && dx !== 0 && dy !== 0 ? 1.414 : 1;
       const tentativeG = gScore.get(current.key) + moveCost;
 
       if (tentativeG < (gScore.get(neighborKey) ?? Infinity)) {
         cameFrom.set(neighborKey, current.key);
         gScore.set(neighborKey, tentativeG);
         const f = tentativeG + heuristic({ x: nx, y: ny }, goal);
-        openList.push({ key: neighborKey, f });
+        openList.push({ key: neighborKey }, f);
       }
     }
   }
@@ -115,11 +153,12 @@ function reconstructPath(cameFrom, currentKey) {
  * @returns {{x: number, y: number}}
  */
 export function worldToGrid(worldX, worldZ, tileSize, worldHalfSize) {
+  const gridDim = Math.floor((worldHalfSize * 2) / tileSize);
   const gx = Math.floor((worldX + worldHalfSize) / tileSize);
   const gy = Math.floor((worldZ + worldHalfSize) / tileSize);
   return {
-    x: Math.max(0, Math.min(gx, 95)),
-    y: Math.max(0, Math.min(gy, 95))
+    x: Math.max(0, Math.min(gx, gridDim - 1)),
+    y: Math.max(0, Math.min(gy, gridDim - 1))
   };
 }
 
@@ -135,32 +174,5 @@ export function gridToWorld(gx, gy, tileSize, worldHalfSize) {
   return {
     x: gx * tileSize + tileSize / 2 - worldHalfSize,
     z: gy * tileSize + tileSize / 2 - worldHalfSize
-  };
-}
-
-/**
- * Smooth movement along path waypoints — interpolates between grid cells
- * Returns world position for a given progress (0..1) along the path
- * @param {Array<{x: number, y: number}>} path
- * @param {number} progress - 0 = start, 1 = goal
- * @param {number} tileSize
- * @param {number} worldHalfSize
- * @returns {{x: number, z: number}}
- */
-export function lerpPath(path, progress, tileSize, worldHalfSize) {
-  if (!path || path.length === 0) return { x: 0, z: 0 };
-
-  const clamped = Math.max(0, Math.min(1, progress));
-  const totalSteps = path.length - 1;
-  const floatIndex = clamped * totalSteps;
-  const idx = Math.floor(floatIndex);
-  const t = floatIndex - idx;
-
-  const from = gridToWorld(path[Math.min(idx, path.length - 1)].x, path[Math.min(idx, path.length - 1)].y, tileSize, worldHalfSize);
-  const to = gridToWorld(path[Math.min(idx + 1, path.length - 1)].x, path[Math.min(idx + 1, path.length - 1)].y, tileSize, worldHalfSize);
-
-  return {
-    x: from.x + (to.x - from.x) * t,
-    z: from.z + (to.z - from.z) * t
   };
 }

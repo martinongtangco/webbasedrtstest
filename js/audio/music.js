@@ -1,32 +1,37 @@
+import { ensureTone } from './sfx.js';
+
 /**
  * Simple looping music using Tone.js
  */
 export class Music {
-  constructor() { this.ready = false; this.playing = false; }
+  constructor() { this.ready = false; this.playing = false; this.tone = null; this.synth = null; this.loop = null; }
 
   async init() {
+    if (this.ready) return;
     try {
-      const Tone = await import('https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js');
-      window.Tone = Tone;
+      this.tone = await ensureTone();
       this.ready = true;
     } catch (e) { console.warn('[Music] Tone.js not available'); }
   }
 
   start() {
-    if (!this.ready || !window.Tone || this.playing) return;
+    if (!this.ready || !this.tone || this.playing) return;
     this.playing = true;
-    const Tone = window.Tone;
+    const Tone = this.tone;
     try {
       Tone.start();
-      const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: 'sawtooth' }, envelope: { attack: 0.02, decay: 0.2, sustain: 0.1, release: 0.3 } }).toDestination();
-      synth.volume.value = -18;
-      const loop = new Tone.Loop(time => {
-        synth.triggerAttackRelease(['C2', 'E2', 'G2'], '8n', time);
-        synth.triggerAttackRelease(['C3', 'E3', 'G3'], '8n', time + 0.5);
-        synth.triggerAttackRelease(['A2', 'C3', 'E3'], '8n', time + 1);
-        synth.triggerAttackRelease(['F2', 'A2', 'C3'], '8n', time + 1.5);
+      this.synth = new Tone.PolySynth(Tone.Synth, {
+        oscillator: { type: 'sawtooth' },
+        envelope: { attack: 0.02, decay: 0.2, sustain: 0.1, release: 0.3 }
+      }).toDestination();
+      this.synth.volume.value = -18;
+      this.loop = new Tone.Loop(time => {
+        this.synth.triggerAttackRelease(['C2', 'E2', 'G2'], '8n', time);
+        this.synth.triggerAttackRelease(['C3', 'E3', 'G3'], '8n', time + 0.5);
+        this.synth.triggerAttackRelease(['A2', 'C3', 'E3'], '8n', time + 1);
+        this.synth.triggerAttackRelease(['F2', 'A2', 'C3'], '8n', time + 1.5);
       }, '2n');
-      loop.start(0);
+      this.loop.start(0);
       Tone.Transport.bpm.value = 130;
       Tone.Transport.start();
     } catch (e) { this.playing = false; }
@@ -35,6 +40,10 @@ export class Music {
   stop() {
     if (!this.playing) return;
     this.playing = false;
-    try { window.Tone.Transport.stop(); } catch (e) {}
+    try {
+      if (this.loop) { this.loop.stop(); this.loop.dispose(); this.loop = null; }
+      if (this.synth) { this.synth.dispose(); this.synth = null; }
+      if (this.tone) this.tone.Transport.stop();
+    } catch (e) {}
   }
 }
