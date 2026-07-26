@@ -16,10 +16,10 @@ export const FACTION_DOGS = {
 
   // Building stats
   buildings: {
-    command_center: { hp: 600, sight: 80 },
-    barracks: { hp: 400, sight: 60 },
-    siege_factory: { hp: 500, sight: 65 },
-    gas_mining: { hp: 250, sight: 50 }
+    command_center: { hp: 600, sight: 80, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
+    barracks: { hp: 400, sight: 60, cost: { diamonds: 100, biogas: 0 }, buildTime: 8 },
+    siege_factory: { hp: 500, sight: 65, cost: { diamonds: 150, biogas: 30 }, buildTime: 12 },
+    gas_mining: { hp: 250, sight: 50, cost: { diamonds: 80, biogas: 0 }, buildTime: 5 }
   },
 
   // Unit roster: key → { name, hp, damage, speed, sight, range, cooldown, cost, buildTime }

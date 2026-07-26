@@ -2,6 +2,8 @@
 
 Kanban board for tracking tasks. Update status columns as work progresses.
 
+**Last Ticket Number:** 20
+
 ## Legend
 
 | Marker | Meaning          |
@@ -20,35 +22,33 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🔴 Bugs
 
-- [ ] **Guest input not integrated into host simulation** — `player_input` messages are forwarded by the relay but never consumed by the host game loop. Guest actions have no effect. `js/network/client.js`, `main.js`
-- [ ] **Fog of war not visually applied** — Visibility tracking works (grid state + minimap) but units/buildings remain fully visible even outside the player's sight range. `main.js`, `js/engine/fogOfWar.js`
-- [ ] **Shoot/explosion SFX defined but never triggered** — `sfx.js` registers `shoot` and `explosion` sounds but `main.js` never calls them during combat/death. `js/audio/sfx.js`, `main.js`
+*(All bugs fixed — see Done below)*
 
 ### 🟠 High Priority — Core Gameplay
 
-- [ ] **Improve skirmish AI** — Add defensive behavior (idle units guard buildings), multi-pronged attacks, adaptive strategy based on player actions. `js/ai/skirmishAI.js`
-- [ ] **Building auto-defense** — Buildings should attack nearby enemy units when in range (e.g., command center turret, defensive towers). `js/entities/buildings.js`, `main.js`
-- [ ] **Network bandwidth optimization** — Full-state broadcast every frame is heavy. Implement delta snapshots (only send changed entities) or throttled updates. `js/network/client.js`, `main.js`
-- [ ] **Unit selection ring visible through fog** — Selected enemy units beyond fog boundary should not reveal themselves. `main.js`
+- [ ] **ADR-4 — Improve skirmish AI** — Add defensive behavior (idle units guard buildings), multi-pronged attacks, adaptive strategy based on player actions. `js/ai/skirmishAI.js`
+- [ ] **ADR-5 — Building auto-defense** — Buildings should attack nearby enemy units when in range (e.g., command center turret, defensive towers). `js/entities/buildings.js`, `main.js`
+- [ ] **ADR-6 — Network bandwidth optimization** — Full-state broadcast every frame is heavy. Implement delta snapshots (only send changed entities) or throttled updates. `js/network/client.js`, `main.js`
+- [ ] **ADR-7 — Unit selection ring visible through fog** — Selected enemy units beyond fog boundary should not reveal themselves. `main.js`
 
 ### 🟡 Medium Priority — Polish & Features
 
-- [ ] **Unit walking/attack animations** — Units are static meshes; add bobbing/rotation during movement and aim animation during attacks. `js/entities/units.js`
-- [ ] **Particle effects for combat and death** — Particle system exists (command indicator rings) but death/combat particles are not spawned. `main.js`, `js/entities/units.js`
-- [ ] **Dynamic pathfinding obstacles** — A* grid is static; moving units should temporarily block grid cells for better pathfinding. `js/engine/pathfinding.js`
-- [ ] **Chat UI** — WebSocket protocol supports `chat` messages but no client-side chat input or message display exists. `js/ui/hud.js`, `js/network/client.js`
-- [ ] **Unit upgrades / tech tree** — No upgrade system. Add a researchable upgrade path (e.g., +damage, +speed, +HP). `main.js`, `js/ui/hud.js`
-- [ ] **Settings / options menu** — No volume sliders, difficulty selection, or graphics quality options. `index.html`, `style.css`, `main.js`
+- [ ] **ADR-8 — Unit walking/attack animations** — Units are static meshes; add bobbing/rotation during movement and aim animation during attacks. `js/entities/units.js`
+- [ ] **ADR-9 — Particle effects for combat and death** — Particle system exists (command indicator rings) but death/combat particles are not spawned. `main.js`, `js/entities/units.js`
+- [ ] **ADR-10 — Dynamic pathfinding obstacles** — A* grid is static; moving units should temporarily block grid cells for better pathfinding. `js/engine/pathfinding.js`
+- [ ] **ADR-11 — Chat UI** — WebSocket protocol supports `chat` messages but no client-side chat input or message display exists. `js/ui/hud.js`, `js/network/client.js`
+- [ ] **ADR-12 — Unit upgrades / tech tree** — No upgrade system. Add a researchable upgrade path (e.g., +damage, +speed, +HP). `main.js`, `js/ui/hud.js`
+- [ ] **ADR-13 — Settings / options menu** — No volume sliders, difficulty selection, or graphics quality options. `index.html`, `style.css`, `main.js`
 
 ### 🟢 Low Priority — Nice-to-Have
 
-- [ ] **Multiple map layouts** — Single hardcoded map. Add procedural or hand-crafted map variations. `main.js`
-- [ ] **Spectator mode** — Third player joins and watches without controlling. `js/network/client.js`, `main.js`
-- [ ] **Replay system** — Record game events and replay later. New module.
-- [ ] **NAT traversal (WebRTC)** — Enable play across different networks, not just LAN. `server.js`, `js/network/client.js`
-- [ ] **Custom 3D models (glTF)** — Replace Three.js primitives with imported models. `js/factions/`, `js/entities/`
-- [ ] **Connection quality indicator** — Show ping/latency to the other player. `js/network/client.js`, `js/ui/hud.js`
-- [ ] **Save/load game state** — Persist and restore games. New module.
+- [ ] **ADR-14 — Multiple map layouts** — Single hardcoded map. Add procedural or hand-crafted map variations. `main.js`
+- [ ] **ADR-15 — Spectator mode** — Third player joins and watches without controlling. `js/network/client.js`, `main.js`
+- [ ] **ADR-16 — Replay system** — Record game events and replay later. New module.
+- [ ] **ADR-17 — NAT traversal (WebRTC)** — Enable play across different networks, not just LAN. `server.js`, `js/network/client.js`
+- [ ] **ADR-18 — Custom 3D models (glTF)** — Replace Three.js primitives with imported models. `js/factions/`, `js/entities/`
+- [ ] **ADR-19 — Connection quality indicator** — Show ping/latency to the other player. `js/network/client.js`, `js/ui/hud.js`
+- [ ] **ADR-20 — Save/load game state** — Persist and restore games. New module.
 
 ---
 
@@ -62,9 +62,9 @@ Tasks currently being worked on. *(empty)*
 
 Tasks that depend on other work being completed first.
 
-- [ ] **Replay system** — Blocked on: event recording infrastructure, deterministic simulation
-- [ ] **Spectator mode** — Blocked on: guest input not integrated (bug above)
-- [ ] **NAT traversal** — Blocked on: core LAN multiplayer needs to be rock-solid first
+- [ ] **ADR-16 — Replay system** — Blocked on: event recording infrastructure, deterministic simulation
+- [ ] **ADR-15 — Spectator mode** — ADR-1 resolved; still needs spectator-specific logic (read-only state sync, no input forwarding). `js/network/client.js`, `js/main.js`
+- [ ] **ADR-17 — NAT traversal** — Blocked on: core LAN multiplayer needs to be rock-solid first
 
 ---
 
@@ -72,6 +72,9 @@ Tasks that depend on other work being completed first.
 
 Completed tasks. Move here from Backlog or In Progress when finished.
 
+- [x] **ADR-1 — Guest input integrated into host simulation** — Added `onPlayerInput` callback to NetworkClient host config; host now calls `processSelection`/`processBoxSelection`/`processCommand` for guest inputs. Refactored `handleInput()` into reusable functions. `js/network/client.js`, `js/main.js`
+- [x] **ADR-2 — Fog of war visually applied** — Enemy units/buildings now have `mesh.visible` toggled based on `fogPlayer.isVisible()` at their grid position after fog tick+reveal. `js/main.js`
+- [x] **ADR-3 — Shoot/explosion SFX triggered** — `unit_shoot` custom event dispatched in `Unit.updateCombat()` when firing, listened in `main.js` to play `sfx.play('shoot')`. `wasAlive` tracking for units and buildings; `sfx.play('explosion')` when `wasAlive && !alive`. `js/entities/units.js`, `js/main.js`
 - [x] **Three factions** (K9 Corps, Feline Vanguard, Abyssal Trident) with unique units, buildings, meshes, colors, and balanced stats
 - [x] **Game loop & state machine** — menu → playing → gameover with fixed-timestep simulation
 - [x] **Three.js scene** — terrain with vertex displacement, lighting, shadows, ground plane, border walls

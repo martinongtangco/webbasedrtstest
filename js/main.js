@@ -40,6 +40,9 @@ let playerFaction = FACTION_DOGS;
 let playerFactionKey = 'dogs';
 let selectedBuilding = null;
 
+// Building placement
+let placementMode = null // { type: string, ghostMesh: THREE.Group, valid: boolean, shakeTimer: number }
+
 // Faction registry
 const FACTIONS = {
   dogs: FACTION_DOGS,
@@ -63,6 +66,7 @@ let selectionCanvas, selectionCtx;
 
 // Death particles
 let particles = [];
+let commandIndicators = [];
 
 // DOM
 const mainMenuEl = document.getElementById('main-menu');
@@ -74,9 +78,14 @@ const btnHost = document.getElementById('btn-host');
 const btnJoin = document.getElementById('btn-join');
 const btnConnect = document.getElementById('btn-connect');
 const btnMenu = document.getElementById('btn-menu');
+const btnBuildToggle = document.getElementById('btn-build-toggle');
 const joinPanel = document.getElementById('join-panel');
 const hostIpInput = document.getElementById('host-ip');
 const factionButtons = document.querySelectorAll('.faction-btn');
+const waitingOverlay = document.getElementById('waiting-overlay');
+const hostIpDisplay = document.getElementById('host-ip-display');
+const btnCancelHost = document.getElementById('btn-cancel-host');
+const placementMenuEl = document.getElementById('placement-menu');
 
 // ── Init ───────────────────────────────────────────────────────────────
 function init() {
@@ -117,8 +126,14 @@ function init() {
   // Minimap click → jump camera
   window.addEventListener('minimap_click', onMinimapClick);
 
+  // ADR-3: Unit shoot SFX
+  window.addEventListener('unit_shoot', () => sfx.play('shoot'));
+
   // Harvester deposited resources
   window.addEventListener('resource_deposited', onResourceDeposited);
+
+  // Start placement mode
+  window.addEventListener('start_placement', onStartPlacement);
 
   // Init audio
   sfx = new SFX();
@@ -202,7 +217,26 @@ function setupMenuEvents() {
     const ip = hostIpInput.value.trim();
     if (ip) startGame('guest', { hostIp: ip });
   });
+  btnCancelHost.addEventListener('click', () => {
+    if (gameState === 'waiting') returnToMenu();
+  });
   btnMenu.addEventListener('click', returnToMenu);
+
+  // Build toggle button
+  btnBuildToggle.addEventListener('click', () => {
+    if (placementMode) {
+      cancelPlacement();
+      return;
+    }
+    const menuVisible = placementMenuEl && !placementMenuEl.classList.contains('hidden');
+    if (menuVisible) {
+      hud.hidePlacementMenu();
+      btnBuildToggle.classList.remove('active');
+    } else {
+      hud.showPlacementMenu(playerFaction, playerDiamonds, playerBiogas);
+      btnBuildToggle.classList.add('active');
+    }
+  });
 }
 
 // ── Game Start/End ─────────────────────────────────────────────────────
@@ -225,6 +259,9 @@ function startGame(mode, opts = {}) {
   playerBiogas = 0;
   selectedBuilding = null;
   ai = null;
+  placementMode = null;
+  if (placementMenuEl) placementMenuEl.classList.add('hidden');
+  if (btnBuildToggle) btnBuildToggle.classList.remove('active');
 
   // HUD
   hud = new HUD();
@@ -266,6 +303,8 @@ function startGame(mode, opts = {}) {
   } else if (mode === 'host') {
     gameState = 'waiting'; // wait for guest to join
     netWaiting = true;
+    waitingOverlay.classList.remove('hidden');
+    hostIpDisplay.textContent = `http://${location.hostname}:${location.port}`;
     // Host gets AI for enemy team (team 1) — guest replaces AI control when connected
     ai = new SkirmishAI({
       units, buildings, resources, tileSize: TILE_SIZE, worldHalfSize: WORLD_HALF, fog: fogEnemy
@@ -274,10 +313,20 @@ function startGame(mode, opts = {}) {
       onGuestConnected: () => {
         netWaiting = false;
         gameState = 'playing';
+        waitingOverlay.classList.add('hidden');
         spawnInitialHarvesters();
       },
       onOpponentLeft: () => {
         endGame(false);
+      },
+      onPlayerInput: (data) => {
+        if (data.action === 'select') {
+          processSelection(data.x, data.z);
+        } else if (data.action === 'box_select') {
+          processBoxSelection(data.minX, data.minZ, data.maxX, data.maxZ);
+        } else if (data.action === 'command') {
+          processCommand(data.x, data.z);
+        }
       },
       onError: (msg) => {
         console.warn('[Net]', msg);
@@ -287,6 +336,8 @@ function startGame(mode, opts = {}) {
   } else if (mode === 'guest') {
     gameState = 'waiting';
     netWaiting = true;
+    waitingOverlay.classList.remove('hidden');
+    hostIpDisplay.textContent = `Connecting to ${opts.hostIp}...`;
     net = new NetworkClient('guest', {
       onOpponentLeft: () => {
         if (gameState === 'playing') endGame(false);
@@ -295,6 +346,7 @@ function startGame(mode, opts = {}) {
         if (gameState === 'waiting') {
           gameState = 'playing';
           netWaiting = false;
+          waitingOverlay.classList.add('hidden');
         }
         applyRemoteState(state);
       },
@@ -387,6 +439,9 @@ function returnToMenu() {
   if (net) { net.disconnect(); net = null; }
   netWaiting = false;
 
+  // Cancel placement mode
+  cancelPlacement();
+
   gameState = 'menu';
   gameMode = null;
   mainMenuEl.classList.remove('hidden');
@@ -400,7 +455,10 @@ function returnToMenu() {
   for (const b of buildings) if (b.mesh) scene.remove(b.mesh);
   for (const r of resources) if (r.mesh) scene.remove(r.mesh);
   for (const p of particles) if (p.mesh) scene.remove(p.mesh);
-  units = []; buildings = []; resources = []; particles = [];
+  for (const ci of commandIndicators) if (ci.mesh) scene.remove(ci.mesh);
+  units = []; buildings = []; resources = []; particles = []; commandIndicators = [];
+  waitingOverlay.classList.add('hidden');
+  placementMode = null;
 
   // Reset faction UI
   factionButtons.forEach(b => b.classList.remove('selected'));
@@ -423,6 +481,9 @@ function endGame(victory) {
   // Disconnect network
   if (net) { net.disconnect(); net = null; }
   netWaiting = false;
+
+  // Cancel placement mode
+  cancelPlacement();
 
   gameState = 'gameover';
   gameOverEl.classList.remove('hidden');
@@ -469,6 +530,139 @@ function spawnBuilding(type, faction, x, z, team) {
 // Expose spawnBuilding to AI
 window.spawnBuilding = spawnBuilding;
 
+// ── Building Placement ─────────────────────────────────────────────────
+
+/** Check if a building can be placed at (x, z) */
+function isPlacementValid(x, z) {
+  // World bounds check
+  const margin = 6;
+  if (x < -WORLD_HALF + margin || x > WORLD_HALF - margin) return false;
+  if (z < -WORLD_HALF + margin || z > WORLD_HALF - margin) return false;
+
+  // Overlap with existing buildings (8 unit radius)
+  for (const b of buildings) {
+    if (!b.alive) continue;
+    const dx = x - b.x, dz = z - b.z;
+    if (dx * dx + dz * dz < 64) return false;
+  }
+
+  // Overlap with resources (6 unit radius)
+  for (const r of resources) {
+    if (!r.alive || r.amount <= 0) continue;
+    const dx = x - r.x, dz = z - r.z;
+    if (dx * dx + dz * dz < 36) return false;
+  }
+
+  return true;
+}
+
+/** Create a semi-transparent ghost mesh for placement preview */
+function createGhostMesh(buildingType) {
+  const group = new THREE.Group();
+  const factionDef = playerFaction;
+
+  // Create a temporary building object to use buildBuildingMesh
+  const tempBuilding = {
+    type: buildingType,
+    team: 0,
+    faction: playerFactionKey
+  };
+
+  if (factionDef && factionDef.buildBuildingMesh) {
+    factionDef.buildBuildingMesh(tempBuilding, group);
+  } else {
+    const geo = new THREE.BoxGeometry(4, 3, 4);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x4488ff, transparent: true, opacity: 0.4 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 1.5;
+    group.add(mesh);
+  }
+
+  // Make all materials semi-transparent
+  group.traverse(child => {
+    if (child.isMesh) {
+      child.material = child.material.clone();
+      child.material.transparent = true;
+      child.material.opacity = 0.5;
+      child.material.depthWrite = false;
+    }
+  });
+
+  scene.add(group);
+  return group;
+}
+
+/** Handle the start_placement custom event */
+function onStartPlacement(e) {
+  const { type } = e.detail;
+  const buildDef = playerFaction.buildings[type];
+  if (!buildDef || !buildDef.cost) return;
+
+  // Check affordability
+  if (playerDiamonds < buildDef.cost.diamonds || playerBiogas < (buildDef.cost.biogas || 0)) return;
+
+  // Hide placement menu
+  hud.hidePlacementMenu();
+  btnBuildToggle.classList.remove('active');
+
+  // Enter placement mode
+  const ghostMesh = createGhostMesh(type);
+  placementMode = {
+    type,
+    ghostMesh,
+    valid: false,
+    shakeTimer: 0
+  };
+}
+
+/** Cancel building placement and clean up */
+function cancelPlacement() {
+  if (!placementMode) return;
+  if (placementMode.ghostMesh) {
+    scene.remove(placementMode.ghostMesh);
+    // Dispose materials to prevent memory leaks
+    placementMode.ghostMesh.traverse(child => {
+      if (child.isMesh && child.material) child.material.dispose();
+    });
+  }
+  placementMode = null;
+  hud.hidePlacementMenu();
+  btnBuildToggle.classList.remove('active');
+}
+
+/** Try to place a building at world position (x, z) */
+function tryPlaceBuilding(x, z) {
+  if (!placementMode) return;
+
+  const buildDef = playerFaction.buildings[placementMode.type];
+  if (!buildDef) return;
+
+  const valid = isPlacementValid(x, z);
+
+  if (!valid) {
+    // Shake the ghost mesh as visual rejection
+    placementMode.shakeTimer = 0.3;
+    return;
+  }
+
+  // Deduct cost
+  playerDiamonds -= buildDef.cost.diamonds;
+  playerBiogas -= (buildDef.cost.biogas || 0);
+
+  // Remove ghost
+  scene.remove(placementMode.ghostMesh);
+  placementMode.ghostMesh.traverse(child => {
+    if (child.isMesh && child.material) child.material.dispose();
+  });
+
+  // Spawn the real building
+  spawnBuilding(placementMode.type, playerFactionKey, x, z, 0);
+  sfx.play('build');
+
+  // Exit placement mode
+  placementMode = null;
+}
+
 // ── Production ─────────────────────────────────────────────────────────
 function onProduceUnit(e) {
   const { buildingId, unitType } = e.detail;
@@ -507,139 +701,218 @@ function updateProduction() {
   }
 }
 
+/** Create a visual command indicator ring on the ground */
+function addCommandIndicator(x, z, color) {
+  const geo = new THREE.RingGeometry(0.5, 0.8, 16);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({
+    color: color,
+    transparent: true,
+    opacity: 1,
+    side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, 0.2, z);
+  mesh.scale.set(0.01, 0.01, 0.01);
+  scene.add(mesh);
+  commandIndicators.push({ mesh, life: 0.8 });
+}
+
 // ── Input Handling ─────────────────────────────────────────────────────
+
+/** Process a left-click selection at world position (wx, wz) */
+function processSelection(wx, wz) {
+  // Check buildings first
+  let clickedBuilding = null;
+  for (const b of buildings) {
+    if (!b.alive || b.team !== 0) continue;
+    if (b.containsPoint(wx, wz, 2)) { clickedBuilding = b; break; }
+  }
+
+  if (clickedBuilding) {
+    for (const u of units) if (u.team === 0) u.selected = false;
+    for (const b of buildings) b.selected = false;
+    clickedBuilding.selected = true;
+    selectedBuilding = clickedBuilding;
+    hud.showUnitInfo(clickedBuilding);
+    hud.showBuildMenu(clickedBuilding, playerFaction, playerDiamonds, playerBiogas);
+    sfx.play('select');
+  } else {
+    for (const u of units) u.selected = false;
+    selectedBuilding = null;
+    hud.hideBuildMenu();
+
+    let selected = false;
+    for (const u of units) {
+      if (!u.alive || u.team !== 0) continue;
+      if (u.containsPoint(wx, wz, 2)) {
+        u.selected = true;
+        selected = true;
+      }
+    }
+
+    if (selected) {
+      const sel = units.find(u => u.alive && u.selected && u.team === 0);
+      hud.showUnitInfo(sel);
+      sfx.play('select');
+    } else {
+      hud.hideUnitInfo();
+    }
+  }
+}
+
+/** Process a box selection */
+function processBoxSelection(minX, minZ, maxX, maxZ) {
+  for (const u of units) {
+    if (!u.alive || u.team !== 0) continue;
+    u.selected = u.insideBox(minX, minZ, maxX, maxZ);
+  }
+  for (const b of buildings) b.selected = false;
+  selectedBuilding = null;
+  hud.hideBuildMenu();
+  const sel = units.find(u => u.alive && u.selected && u.team === 0);
+  hud.showUnitInfo(sel);
+  sfx.play('select');
+}
+
+/** Process a right-click command at world position (wx, wz) */
+function processCommand(wx, wz) {
+  const selectedUnits = units.filter(u => u.alive && u.selected && u.team === 0);
+  if (selectedUnits.length === 0) return;
+
+  // Check enemy unit
+  let targetUnit = null;
+  for (const u of units) {
+    if (!u.alive || u.team === 0) continue;
+    if (u.containsPoint(wx, wz, 3)) { targetUnit = u; break; }
+  }
+  if (targetUnit) {
+    for (const su of selectedUnits) su.attackUnit(targetUnit);
+    addCommandIndicator(wx, wz, 0xff4444);
+    sfx.play('move');
+    return;
+  }
+
+  // Check resource
+  let targetResource = null;
+  for (const r of resources) {
+    if (!r.alive || r.amount <= 0) continue;
+    const dx = wx - r.x, dz = wz - r.z;
+    if (dx*dx + dz*dz < 64) { targetResource = r; break; }
+  }
+  if (targetResource) {
+    for (const su of selectedUnits) {
+      if (su.type === 'harvester') {
+        const cc = buildings.find(b => b.alive && b.team === 0 && b.type === 'command_center');
+        if (cc) su.gatherFrom(targetResource, cc);
+      } else {
+        su.moveTo(wx, wz, pathGrid, TILE_SIZE, WORLD_HALF);
+      }
+    }
+    addCommandIndicator(wx, wz, 0xffff00);
+    sfx.play('move');
+    return;
+  }
+
+  // Move order
+  for (const su of selectedUnits) {
+    su.moveTo(wx, wz, pathGrid, TILE_SIZE, WORLD_HALF);
+  }
+  addCommandIndicator(wx, wz, 0x00ff88);
+  sfx.play('move');
+}
+
+/** Handle placement mode input; returns true if placement input was consumed */
+function processPlacementInput(leftClick, rightClick, selBox) {
+  if (leftClick && leftClick.world) {
+    tryPlaceBuilding(leftClick.world.x, leftClick.world.z);
+    return true;
+  }
+  if (rightClick) {
+    cancelPlacement();
+    return true;
+  }
+  // selBox is consumed (ignored) in placement mode
+  return !!selBox;
+}
+
 function handleInput() {
   const leftClick = input.getLeftClick();
   const rightClick = input.getRightClick();
   const selBox = input.getSelectionBox();
+
+  // ── Placement mode input (checked first) ──
+  if (placementMode) {
+    if (processPlacementInput(leftClick, rightClick, selBox)) return;
+  }
 
   // Guest mode: forward all input to host
   if (gameMode === 'guest' && net && net.connected) {
     if (leftClick && leftClick.world) {
       net.sendInput({ action: 'select', x: leftClick.world.x, z: leftClick.world.z });
     }
-    if (selBox) {
+    if (selBox && !placementMode) {
       net.sendInput({ action: 'box_select', minX: selBox.min.x, minZ: selBox.min.z, maxX: selBox.max.x, maxZ: selBox.max.z });
     }
-    if (rightClick && rightClick.world) {
+    if (rightClick && rightClick.world && !placementMode) {
       net.sendInput({ action: 'command', x: rightClick.world.x, z: rightClick.world.z });
     }
     // Still process locally for visual feedback
   }
 
-  // Left click / box select
+  // Left click — select
   if (leftClick && leftClick.world) {
-    const wx = leftClick.world.x, wz = leftClick.world.z;
-
-    // Check buildings first
-    let clickedBuilding = null;
-    for (const b of buildings) {
-      if (!b.alive || b.team !== 0) continue;
-      if (b.containsPoint(wx, wz, 2)) { clickedBuilding = b; break; }
-    }
-
-    if (clickedBuilding) {
-      // Select building
-      for (const u of units) if (u.team === 0) u.selected = false;
-      for (const b of buildings) b.selected = false;
-      clickedBuilding.selected = true;
-      selectedBuilding = clickedBuilding;
-      hud.showUnitInfo(clickedBuilding);
-      hud.showBuildMenu(clickedBuilding, playerFaction, playerDiamonds, playerBiogas);
-      sfx.play('select');
-    } else {
-      // Select units
-      for (const u of units) u.selected = false;
-      selectedBuilding = null;
-      hud.hideBuildMenu();
-
-      let selected = false;
-      for (const u of units) {
-        if (!u.alive || u.team !== 0) continue;
-        if (u.containsPoint(wx, wz, 2)) {
-          u.selected = true;
-          selected = true;
-        }
-      }
-
-      if (selected) {
-        const sel = units.find(u => u.alive && u.selected && u.team === 0);
-        hud.showUnitInfo(sel);
-        sfx.play('select');
-      } else {
-        hud.hideUnitInfo();
-      }
-    }
+    processSelection(leftClick.world.x, leftClick.world.z);
   }
 
   // Selection box
-  if (selBox) {
-    for (const u of units) {
-      if (!u.alive || u.team !== 0) continue;
-      u.selected = u.insideBox(selBox.min.x, selBox.min.z, selBox.max.x, selBox.max.z);
-    }
-    for (const b of buildings) b.selected = false;
-    selectedBuilding = null;
-    hud.hideBuildMenu();
-    const sel = units.find(u => u.alive && u.selected && u.team === 0);
-    hud.showUnitInfo(sel);
-    sfx.play('select');
+  if (selBox && !placementMode) {
+    processBoxSelection(selBox.min.x, selBox.min.z, selBox.max.x, selBox.max.z);
   }
 
   // Right click — move / attack / gather
-  if (rightClick && rightClick.world) {
-    const wx = rightClick.world.x, wz = rightClick.world.z;
-    const selectedUnits = units.filter(u => u.alive && u.selected && u.team === 0);
-
-    if (selectedUnits.length === 0) return;
-
-    // Check if right-clicked on enemy unit/building
-    let targetUnit = null;
-    for (const u of units) {
-      if (!u.alive || u.team === 0) continue;
-      if (u.containsPoint(wx, wz, 3)) { targetUnit = u; break; }
-    }
-
-    if (targetUnit) {
-      for (const su of selectedUnits) {
-        su.attackUnit(targetUnit);
-      }
-      sfx.play('move');
-      return;
-    }
-
-    // Check if right-clicked on resource (for harvesters)
-    let targetResource = null;
-    for (const r of resources) {
-      if (!r.alive || r.amount <= 0) continue;
-      const dx = wx - r.x, dz = wz - r.z;
-      if (dx*dx + dz*dz < 64) { targetResource = r; break; }
-    }
-
-    if (targetResource) {
-      for (const su of selectedUnits) {
-        if (su.type === 'harvester') {
-          const cc = buildings.find(b => b.alive && b.team === 0 && b.type === 'command_center');
-          if (cc) su.gatherFrom(targetResource, cc);
-        } else {
-          su.moveTo(wx, wz, pathGrid, TILE_SIZE, WORLD_HALF);
-        }
-      }
-      sfx.play('move');
-      return;
-    }
-
-    // Move order
-    for (const su of selectedUnits) {
-      su.moveTo(wx, wz, pathGrid, TILE_SIZE, WORLD_HALF);
-    }
-    sfx.play('move');
+  if (rightClick && rightClick.world && !placementMode) {
+    processCommand(rightClick.world.x, rightClick.world.z);
   }
 }
 
 // ── Update ─────────────────────────────────────────────────────────────
 function update(dt, time) {
   handleInput();
+
+  // ── Placement ghost mesh update ──
+  if (placementMode) {
+    const ndc = input.getMouse();
+    const raycaster = camera.camera ? new THREE.Raycaster() : null;
+    if (raycaster) {
+      raycaster.setFromCamera(ndc, camera.camera);
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const intersection = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(groundPlane, intersection)) {
+        placementMode.ghostMesh.position.set(intersection.x, 0, intersection.z);
+        placementMode.valid = isPlacementValid(intersection.x, intersection.z);
+
+        // Tint green (valid) or red (invalid)
+        const tint = placementMode.valid ? 0x00ff88 : 0xff3344;
+        placementMode.ghostMesh.traverse(child => {
+          if (child.isMesh && child.material) {
+            child.material.color.setHex(tint);
+            child.material.emissive && child.material.emissive.setHex(tint);
+          }
+        });
+      }
+    }
+
+    // Shake animation on invalid placement attempt
+    if (placementMode.shakeTimer > 0) {
+      placementMode.shakeTimer -= dt;
+      const shakeAmount = Math.sin(placementMode.shakeTimer * 60) * 0.5;
+      placementMode.ghostMesh.position.x += shakeAmount;
+    }
+  }
+
+  // Track which units were alive before this frame (for death SFX — ADR-3)
+  for (const u of units) u._wasAlive = u.alive;
 
   // Update units
   for (const u of units) {
@@ -651,6 +924,7 @@ function update(dt, time) {
 
     u.updateMovement(dt, pathGrid, TILE_SIZE, WORLD_HALF);
     u.updateCombat(dt, units, pathGrid, TILE_SIZE, WORLD_HALF);
+    u.updateHealing(dt, units);
     u.updateAutoAttack(dt, units);
     u.updateGathering(dt, TILE_SIZE, WORLD_HALF);
     u.updateHealthBar();
@@ -658,8 +932,18 @@ function update(dt, time) {
     u.billboardBars(camera.camera);
   }
 
+  // ADR-3: Play explosion SFX for units that just died this frame
+  for (const u of units) {
+    if (u._wasAlive && !u.alive) {
+      sfx.play('explosion');
+    }
+  }
+
   // Remove dead units
   units = units.filter(u => u.alive || u.deathTimer > 0);
+
+  // Track which buildings were alive (for death SFX — ADR-3)
+  for (const b of buildings) b._wasAlive = b.alive;
 
   // Update buildings
   for (const b of buildings) {
@@ -671,6 +955,12 @@ function update(dt, time) {
     b.updateHealthBar();
     b.syncMesh();
     b.billboardBars(camera.camera);
+  }
+  // ADR-3: Play explosion SFX for buildings that just died this frame
+  for (const b of buildings) {
+    if (b._wasAlive && !b.alive) {
+      sfx.play('explosion');
+    }
   }
   buildings = buildings.filter(b => b.alive || b.deathTimer > 0);
 
@@ -691,6 +981,22 @@ function update(dt, time) {
   }
   particles = particles.filter(p => p.life > 0);
 
+  // Command indicators
+  for (const ci of commandIndicators) {
+    ci.life -= dt;
+    const progress = 1 - ci.life / 0.8;
+    if (progress < 0.3) {
+      const scale = progress / 0.3;
+      ci.mesh.scale.set(scale * 3, scale * 3, scale * 3);
+      ci.mesh.material.opacity = 1;
+    } else {
+      const fade = 1 - (progress - 0.3) / 0.7;
+      ci.mesh.material.opacity = Math.max(0, fade);
+    }
+    if (ci.life <= 0 && ci.mesh) scene.remove(ci.mesh);
+  }
+  commandIndicators = commandIndicators.filter(ci => ci.life > 0);
+
   // Fog of war
   fogPlayer.tick();
   for (const u of units) {
@@ -706,6 +1012,22 @@ function update(dt, time) {
     const sightTiles = Math.floor(b.sightRange / TILE_SIZE);
     if (b.team === 0) fogPlayer.reveal(g.x, g.y, sightTiles);
     else fogEnemy.reveal(g.x, g.y, sightTiles);
+  }
+
+  // ADR-2: Apply fog of war visibility to enemy units and buildings
+  for (const u of units) {
+    if (!u.alive || u.mesh === null) continue;
+    if (u.team !== 0) {
+      const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
+      u.mesh.visible = fogPlayer.isVisible(g.x, g.y);
+    }
+  }
+  for (const b of buildings) {
+    if (!b.alive || b.mesh === null) continue;
+    if (b.team !== 0) {
+      const g = worldToGrid(b.x, b.z, TILE_SIZE, WORLD_HALF);
+      b.mesh.visible = fogPlayer.isVisible(g.x, g.y);
+    }
   }
 
   // AI (only in skirmish; host mode uses a simple AI for the enemy team too)
@@ -760,6 +1082,11 @@ function update(dt, time) {
   // Update build menu affordability
   if (selectedBuilding && selectedBuilding.alive) {
     hud.showBuildMenu(selectedBuilding, playerFaction, playerDiamonds, playerBiogas);
+  }
+
+  // Update placement menu affordability
+  if (placementMenuEl && !placementMenuEl.classList.contains('hidden')) {
+    hud.updatePlacementMenu(playerFaction, playerDiamonds, playerBiogas);
   }
 }
 

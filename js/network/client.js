@@ -21,6 +21,7 @@ export class NetworkClient {
     this.onGuestConnected = opts.onGuestConnected || (() => {});
     this.onOpponentLeft = opts.onOpponentLeft || (() => {});
     this.onGameState = opts.onGameState || (() => {});
+    this.onPlayerInput = opts.onPlayerInput || (() => {});
     this.onError = opts.onError || ((msg) => console.warn('[Net]', msg));
 
     // Pending messages (queued until connected)
@@ -113,8 +114,11 @@ export class NetworkClient {
         this.onGameState(msg);
         break;
 
-      case 'guest_input':
-        // Shouldn't receive this as a guest
+      case 'player_input':
+        // Host receives guest input and integrates it into simulation
+        if (this.role === 'host') {
+          this.onPlayerInput({ action: msg.action, x: msg.x, z: msg.z, minX: msg.minX, minZ: msg.minZ, maxX: msg.maxX, maxZ: msg.maxZ });
+        }
         break;
 
       default:

@@ -13,6 +13,9 @@ export class HUD {
     this.minimapCtx = this.minimapCanvas.getContext('2d');
     this.minimapContainer.appendChild(this.minimapCanvas);
 
+    // Placement menu
+    this.placementMenuEl = document.getElementById('placement-menu');
+
     // Constants for world↔minimap conversion
     this.MAP_SIZE = 96;       // tiles
     this.TILE_SIZE = 4;       // world units per tile
@@ -126,4 +129,58 @@ export class HUD {
   }
 
   hideUnitInfo() { this.unitInfoEl.innerHTML = ''; }
+
+  /**
+   * Show the placement menu with buttons for each buildable building type.
+   * @param {object} factionDef - Faction definition with buildings
+   * @param {number} diamonds - Current diamond count
+   * @param {number} biogas - Current biogas count
+   */
+  showPlacementMenu(factionDef, diamonds, biogas) {
+    if (!this.placementMenuEl || !factionDef) return;
+    this.placementMenuEl.innerHTML = '';
+    this.placementMenuEl.classList.remove('hidden');
+
+    const buildableTypes = ['barracks', 'siege_factory', 'gas_mining'];
+    for (const btype of buildableTypes) {
+      const def = factionDef.buildings[btype];
+      if (!def || !def.cost) continue;
+      const btn = document.createElement('button');
+      btn.className = 'placement-btn';
+      const canAfford = diamonds >= def.cost.diamonds && biogas >= (def.cost.biogas || 0);
+      btn.disabled = !canAfford;
+      const displayName = btype.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      btn.innerHTML = `${displayName}<span class="cost">&#x1F48E;${def.cost.diamonds}${def.cost.biogas ? ' &#9889;' + def.cost.biogas : ''}</span>`;
+      btn.dataset.buildingType = btype;
+      btn.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('start_placement', { detail: { type: btype } }));
+      });
+      this.placementMenuEl.appendChild(btn);
+    }
+  }
+
+  /** Hide the placement menu panel */
+  hidePlacementMenu() {
+    if (this.placementMenuEl) {
+      this.placementMenuEl.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Update affordability of placement menu buttons based on current resources.
+   * @param {object} factionDef - Faction definition with buildings
+   * @param {number} diamonds - Current diamond count
+   * @param {number} biogas - Current biogas count
+   */
+  updatePlacementMenu(factionDef, diamonds, biogas) {
+    if (!this.placementMenuEl || this.placementMenuEl.classList.contains('hidden')) return;
+    const buttons = this.placementMenuEl.querySelectorAll('.placement-btn');
+    for (const btn of buttons) {
+      const btype = btn.dataset.buildingType;
+      const def = factionDef.buildings[btype];
+      if (!def || !def.cost) continue;
+      const canAfford = diamonds >= def.cost.diamonds && biogas >= (def.cost.biogas || 0);
+      btn.disabled = !canAfford;
+    }
+  }
 }

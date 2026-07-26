@@ -34,10 +34,22 @@
     <div id="resource-bar">
       <span id="diamond-count">💎 0</span>
       <span id="biogas-count">⚡ 0</span>
+      <button id="btn-build-toggle" class="build-toggle-btn">Build</button>
     </div>
+    <div id="placement-menu" class="placement-menu hidden"></div>
     <div id="minimap-container"></div>
     <div id="build-menu"></div>
     <div id="unit-info"></div>
+  </div>
+
+  <!-- Waiting for Opponent Overlay -->
+  <div id="waiting-overlay" class="waiting-overlay hidden">
+    <div class="waiting-content">
+      <h2>WAITING FOR OPPONENT</h2>
+      <p class="waiting-subtitle">Share your IP with your opponent</p>
+      <div id="host-ip-display" class="host-ip-display"></div>
+      <button id="btn-cancel-host" class="menu-btn small">Cancel</button>
+    </div>
   </div>
 
   <!-- Victory/Defeat Screen -->

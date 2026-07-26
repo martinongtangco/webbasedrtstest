@@ -330,6 +330,8 @@ export class Unit {
         this.attackTarget.takeDamage(this.damage);
         this.attackTimer = this.attackCooldown;
         this.muzzleFlashTimer = 0.15;
+        // ADR-3: Play shoot SFX when unit fires
+        window.dispatchEvent(new CustomEvent('unit_shoot', { detail: { id: this.id } }));
       }
     } else {
       // Use pathfinding to approach target (re-path periodically)
@@ -401,6 +403,89 @@ export class Unit {
 
     if (nearest && nearestDist <= this.sightRange) {
       this.attackUnit(nearest);
+    }
+  }
+
+  /**
+   * Support unit healing: find injured friendly units and heal them
+   * Prioritized over auto-attack — called before updateAutoAttack
+   */
+  updateHealing(dt, allUnits) {
+    if (this.type !== 'support' || !this.alive) return;
+
+    // Note: attackTimer is decremented by updateCombat (called after this).
+    // We only decrement muzzleFlashTimer here for visual sync.
+    this.muzzleFlashTimer -= dt;
+
+    // Muzzle flash visual (green for healing)
+    if (this.muzzleFlashMesh) {
+      if (this.muzzleFlashTimer > 0) {
+        this.muzzleFlashMesh.visible = true;
+        this.muzzleFlashMesh.material.opacity = this.muzzleFlashTimer / 0.15;
+        this.muzzleFlashMesh.material.color.setHex(0x00ff88);
+      } else {
+        this.muzzleFlashMesh.visible = false;
+      }
+    }
+
+    // Find nearest friendly unit needing healing
+    if (this.state !== 'healing' || !this.attackTarget || !this.attackTarget.alive) {
+      let nearest = null;
+      let nearestDist = this.sightRange;
+
+      for (const other of allUnits) {
+        if (!other.alive || other.team !== this.team || other.id === this.id) continue;
+        if (other.hp >= other.maxHp) continue;
+        const dx = other.x - this.x;
+        const dz = other.z - this.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = other;
+        }
+      }
+
+      if (nearest) {
+        this.attackTarget = nearest;
+        this.state = 'healing';
+      } else {
+        this.state = 'idle';
+        this.attackTarget = null;
+        if (this.muzzleFlashMesh) this.muzzleFlashMesh.material.color.setHex(0xffff00);
+        return;
+      }
+    }
+
+    const dx = this.attackTarget.x - this.x;
+    const dz = this.attackTarget.z - this.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    // Face target
+    if (this.mesh) {
+      this.mesh.rotation.y = Math.atan2(dx, dz);
+    }
+
+    if (dist <= this.attackRange + 1) {
+      // In range — heal
+      if (this.attackTimer <= 0) {
+        this.attackTarget.hp = Math.min(this.attackTarget.maxHp, this.attackTarget.hp + this.damage);
+        this.attackTimer = this.attackCooldown;
+        this.muzzleFlashTimer = 0.15;
+      }
+    } else {
+      // Move toward target if out of range
+      const moveStep = this.speed * dt;
+      if (dist > moveStep) {
+        this.x += (dx / dist) * moveStep;
+        this.z += (dz / dist) * moveStep;
+      }
+    }
+
+    // If target fully healed, look for another next tick
+    if (this.attackTarget.hp >= this.attackTarget.maxHp) {
+      this.attackTarget = null;
+      this.state = 'idle';
+      if (this.muzzleFlashMesh) this.muzzleFlashMesh.material.color.setHex(0xffff00);
     }
   }
 
