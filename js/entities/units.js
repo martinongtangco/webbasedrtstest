@@ -58,6 +58,11 @@ export class Unit {
     this.autoAttackTimer = 0;
     this.autoAttackInterval = 0.5;
 
+    // ADR-8: Animation state
+    this.animOffset = Math.random() * Math.PI * 2; // unique per-unit phase offset
+    this.facing = 0;              // current rotation in radians
+    this.wasMoving = false;       // flag set during movement for bobbing
+
     // Combat pathfinding
     this.combatPath = null;
     this.combatPathIdx = 0;
@@ -232,9 +237,15 @@ export class Unit {
    * @param {number} worldHalfSize
    */
   updateMovement(dt, grid, tileSize, worldHalfSize) {
+    this.wasMoving = false;
     if (this.state !== 'moving' || !this.moveTarget) return;
 
     if (this.path && this.path.length > 1) {
+      // ADR-8: Compute facing direction from path
+      const distPerStep = this.speed * dt;
+      const totalPathDist = this.path.length - 1;
+      const prevProgress = this.pathProgress;
+      this.pathProgress += distPerStep / (totalPathDist * tileSize);
       // Follow path
       const distPerStep = this.speed * dt;
       const totalPathDist = this.path.length - 1;
@@ -247,6 +258,7 @@ export class Unit {
         this.state = 'idle';
         this.path = null;
         this.moveTarget = null;
+        this.wasMoving = false;
       } else {
         // Interpolate position along path
         const clamped = Math.min(this.pathProgress, 1);
@@ -258,8 +270,16 @@ export class Unit {
         const from = gridToWorld(this.path[Math.min(idx, steps)].x, this.path[Math.min(idx, steps)].y, tileSize, worldHalfSize);
         const to = gridToWorld(this.path[Math.min(idx + 1, steps)].x, this.path[Math.min(idx + 1, steps)].y, tileSize, worldHalfSize);
 
-        this.x = from.x + (to.x - from.x) * t;
-        this.z = from.z + (to.z - from.z) * t;
+        // ADR-8: Set facing direction from path movement delta
+        const dx = to.x - from.x;
+        const dz = to.z - from.z;
+        if (dx !== 0 || dz !== 0) {
+          this.facing = Math.atan2(dx, dz);
+        }
+
+        this.x = from.x + (dx) * t;
+        this.z = from.z + (dz) * t;
+        this.wasMoving = true;
       }
     } else if (this.moveTarget) {
       // Direct movement (no path)
@@ -268,14 +288,21 @@ export class Unit {
       const dist = Math.sqrt(dx * dx + dz * dz);
       const moveStep = this.speed * dt;
 
+      // ADR-8: Set facing direction
+      if (dist > 0) {
+        this.facing = Math.atan2(dx, dz);
+      }
+
       if (dist < moveStep) {
         this.x = this.moveTarget.x;
         this.z = this.moveTarget.z;
         this.state = 'idle';
         this.moveTarget = null;
+        this.wasMoving = false;
       } else {
         this.x += (dx / dist) * moveStep;
         this.z += (dz / dist) * moveStep;
+        this.wasMoving = true;
       }
     }
 
@@ -332,6 +359,8 @@ export class Unit {
         this.muzzleFlashTimer = 0.15;
         // ADR-3: Play shoot SFX when unit fires
         window.dispatchEvent(new CustomEvent('unit_shoot', { detail: { id: this.id } }));
+        // ADR-9: Dispatch event for hit particles at target position
+        window.dispatchEvent(new CustomEvent('unit_hit', { detail: { x: this.attackTarget.x, z: this.attackTarget.z } }));
       }
     } else {
       // Use pathfinding to approach target (re-path periodically)
@@ -473,6 +502,8 @@ export class Unit {
         this.muzzleFlashTimer = 0.15;
       }
     } else {
+      // ADR-8: Face healing target when moving
+      this.facing = Math.atan2(dx, dz);
       // Move toward target if out of range
       const moveStep = this.speed * dt;
       if (dist > moveStep) {
@@ -496,6 +527,7 @@ export class Unit {
    * @param {number} worldHalfSize
    */
   updateGathering(dt, tileSize, worldHalfSize) {
+    this.wasMoving = false;
     if (this.state === 'gathering' && this.gatherTarget && this.gatherTarget.alive) {
       // Move toward resource
       const dx = this.gatherTarget.x - this.x;
@@ -503,6 +535,9 @@ export class Unit {
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist > 3) {
+        // ADR-8: Face gathering target
+        this.facing = Math.atan2(dx, dz);
+        this.wasMoving = true;
         const step = this.speed * dt;
         this.x += (dx / dist) * Math.min(step, dist);
         this.z += (dz / dist) * Math.min(step, dist);
@@ -527,6 +562,9 @@ export class Unit {
       const dist = Math.sqrt(dx * dx + dz * dz);
 
       if (dist > 5) {
+        // ADR-8: Face home building
+        this.facing = Math.atan2(dx, dz);
+        this.wasMoving = true;
         const step = this.speed * dt;
         this.x += (dx / dist) * Math.min(step, dist);
         this.z += (dz / dist) * Math.min(step, dist);
@@ -547,11 +585,44 @@ export class Unit {
 
   /**
    * Sync mesh position
+   * ADR-8: Applies rotation toward facing direction and vertical bobbing during movement/attack
    */
   syncMesh() {
     if (this.mesh) {
       this.mesh.position.set(this.x, 0, this.z);
       this.selectionRing.visible = this.selected;
+
+      // ADR-8: Smooth rotation toward facing direction
+      if (this.facing !== 0 || this.wasMoving) {
+        this.mesh.rotation.y = this.facing;
+      }
+
+      // ADR-8: Vertical bobbing during movement/attack states
+      if (this.state === 'moving' || this.state === 'attacking' || this.state === 'gathering' || this.state === 'returning') {
+        const bobAmount = Math.sin(clockTime + this.animOffset) * 0.15;
+        this.mesh.position.y = Math.max(0, bobAmount);
+      } else if (this.state === 'healing') {
+        const bobAmount = Math.sin(clockTime * 0.7 + this.animOffset) * 0.08;
+        this.mesh.position.y = Math.max(0, bobAmount);
+      } else {
+        this.mesh.position.y = 0;
+      }
+    }
+  }
+
+  /**
+   * ADR-12: Apply an upgrade to this unit's stats (modifies base stats directly)
+   * @param {string} upgradeType - 'weapon' | 'engine' | 'armor'
+   */
+  applyUpgrade(upgradeType) {
+    if (upgradeType === 'weapon') {
+      this.damage = Math.floor(this.damage * 1.2);
+    } else if (upgradeType === 'engine') {
+      this.speed = Math.floor(this.speed * 1.15);
+    } else if (upgradeType === 'armor') {
+      const hpBonus = Math.floor(this.maxHp * 0.25);
+      this.maxHp += hpBonus;
+      this.hp = Math.min(this.hp + hpBonus, this.maxHp);
     }
   }
 

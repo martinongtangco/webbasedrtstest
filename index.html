@@ -21,6 +21,7 @@
       <button id="btn-skirmish" class="menu-btn" disabled>Skirmish vs CPU</button>
       <button id="btn-host" class="menu-btn">Host LAN Game</button>
       <button id="btn-join" class="menu-btn">Join LAN Game</button>
+      <button id="btn-settings" class="menu-btn small">⚙️ Settings</button>
     </div>
     <div id="join-panel" class="join-panel hidden">
       <label for="host-ip">Host IP Address:</label>
@@ -35,11 +36,22 @@
       <span id="diamond-count">💎 0</span>
       <span id="biogas-count">⚡ 0</span>
       <button id="btn-build-toggle" class="build-toggle-btn">Build</button>
+      <button id="btn-upgrades" class="build-toggle-btn">Upgrades</button>
+      <button id="btn-chat" class="build-toggle-btn">Chat</button>
     </div>
     <div id="placement-menu" class="placement-menu hidden"></div>
     <div id="minimap-container"></div>
     <div id="build-menu"></div>
     <div id="unit-info"></div>
+
+    <!-- ADR-11: Chat Panel -->
+    <div id="chat-panel" class="chat-panel hidden">
+      <div id="chat-messages" class="chat-messages"></div>
+      <textarea id="chat-input" class="chat-input" placeholder="Press Enter to send..." rows="1"></textarea>
+    </div>
+
+    <!-- ADR-12: Upgrade Panel -->
+    <div id="upgrade-panel" class="upgrade-panel hidden"></div>
   </div>
 
   <!-- Waiting for Opponent Overlay -->
@@ -56,6 +68,34 @@
   <div id="game-over" class="game-over hidden">
     <h2 id="game-over-title"></h2>
     <button id="btn-menu" class="menu-btn">Return to Menu</button>
+  </div>
+
+  <!-- ADR-13: Settings Modal -->
+  <div id="settings-modal" class="settings-modal hidden">
+    <div class="settings-content">
+      <h2>⚙️ Settings</h2>
+      <div class="settings-group">
+        <label for="sfx-volume">🔊 SFX Volume</label>
+        <input type="range" id="sfx-volume" min="0" max="100" value="70">
+        <span id="sfx-volume-val">70%</span>
+      </div>
+      <div class="settings-group">
+        <label for="music-volume">🎵 Music Volume</label>
+        <input type="range" id="music-volume" min="0" max="100" value="50">
+        <span id="music-volume-val">50%</span>
+      </div>
+      <div class="settings-group">
+        <label for="difficulty-select">🎯 Difficulty</label>
+        <select id="difficulty-select">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </div>
+      <div class="settings-buttons">
+        <button id="btn-close-settings" class="menu-btn small">Close</button>
+      </div>
+    </div>
   </div>
 
   <!-- Three.js Canvas Container -->

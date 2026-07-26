@@ -24,6 +24,8 @@ const WORLD_HALF = WORLD_SIZE / 2;
 // ── Globals ────────────────────────────────────────────────────────────
 let scene, renderer, camera, input;
 let clock = new THREE.Clock();
+// ADR-8: Shared clock time for unit animations
+let clockTime = 0;
 let gameState = 'menu';
 let gameMode = null;
 
@@ -69,7 +71,7 @@ const NET_BROADCAST_INTERVAL = 0.1; // 100ms between broadcasts
 // Selection overlay
 let selectionCanvas, selectionCtx;
 
-// Death particles
+// ADR-9: Death/combat particles + command indicators
 let particles = [];
 let commandIndicators = [];
 
@@ -84,6 +86,12 @@ const btnJoin = document.getElementById('btn-join');
 const btnConnect = document.getElementById('btn-connect');
 const btnMenu = document.getElementById('btn-menu');
 const btnBuildToggle = document.getElementById('btn-build-toggle');
+// ADR-12: Upgrades button
+const btnUpgrades = document.getElementById('btn-upgrades');
+// ADR-11: Chat button
+const btnChat = document.getElementById('btn-chat');
+// ADR-13: Settings button
+const btnSettings = document.getElementById('btn-settings');
 const joinPanel = document.getElementById('join-panel');
 const hostIpInput = document.getElementById('host-ip');
 const factionButtons = document.querySelectorAll('.faction-btn');
@@ -91,6 +99,39 @@ const waitingOverlay = document.getElementById('waiting-overlay');
 const hostIpDisplay = document.getElementById('host-ip-display');
 const btnCancelHost = document.getElementById('btn-cancel-host');
 const placementMenuEl = document.getElementById('placement-menu');
+
+// ADR-12: Upgrade system state
+let upgradeStates = {
+  weapon: { researched: false, researching: false, progress: 0, duration: 15 },
+  engine: { researched: false, researching: false, progress: 0, duration: 12 },
+  armor:  { researched: false, researching: false, progress: 0, duration: 15 }
+};
+
+// ADR-13: Settings
+let gameSettings = {
+  sfxVolume: 70,
+  musicVolume: 50,
+  difficulty: 'medium'
+};
+
+// Load saved settings from localStorage
+function loadSettings() {
+  try {
+    const saved = localStorage.getItem('fu_settings');
+    if (saved) Object.assign(gameSettings, JSON.parse(saved));
+  } catch (e) {}
+}
+loadSettings();
+
+function saveSettings() {
+  try {
+    localStorage.setItem('fu_settings', JSON.stringify(gameSettings));
+  } catch (e) {}
+}
+
+// ADR-13: Volume multipliers (0.0 to 1.0)
+function sfxVolumeMultiplier() { return gameSettings.sfxVolume / 100; }
+function musicVolumeMultiplier() { return gameSettings.musicVolume / 100; }
 
 // ── Init ───────────────────────────────────────────────────────────────
 function init() {
@@ -134,15 +175,88 @@ function init() {
   // ADR-3: Unit shoot SFX
   window.addEventListener('unit_shoot', () => sfx.play('shoot'));
 
+  // ADR-9: Hit particles when units fire
+  window.addEventListener('unit_hit', (e) => spawnHitParticles(e.detail.x, e.detail.z));
+
   // Harvester deposited resources
   window.addEventListener('resource_deposited', onResourceDeposited);
 
   // Start placement mode
   window.addEventListener('start_placement', onStartPlacement);
 
+  // ADR-11: Send chat message event
+  window.addEventListener('send_chat', (e) => {
+    if (net && net.connected) {
+      net.sendChat(e.detail.message);
+    } else {
+      hud.addChatMessage('You', e.detail.message);
+    }
+  });
+
+  // ADR-12: Research upgrade event
+  window.addEventListener('research_upgrade', onResearchUpgrade);
+
+  // ADR-11: Chat button (setup once, references global hud)
+  if (btnChat) {
+    btnChat.addEventListener('click', () => {
+      if (hud && gameState === 'playing') {
+        hud.toggleChat();
+        btnChat.classList.toggle('active', hud.chatVisible);
+      }
+    });
+  }
+
+  // ADR-11: Keyboard shortcut for chat (Enter key)
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && gameState === 'playing' && hud) {
+      // If chat input has focus, the textarea handles Enter itself
+      if (document.activeElement === hud.chatInputEl) return;
+      // Otherwise toggle chat
+      if (!hud.chatVisible) {
+        hud.toggleChat(true);
+        btnChat && btnChat.classList.add('active');
+      }
+    }
+    // ADR-11: Escape to close chat
+    if (e.key === 'Escape' && hud && hud.chatVisible) {
+      hud.toggleChat(false);
+      btnChat && btnChat.classList.remove('active');
+    }
+  });
+
+  // ADR-12: Upgrades button (setup once, references global hud)
+  if (btnUpgrades) {
+    btnUpgrades.addEventListener('click', () => {
+      if (hud && gameState === 'playing') {
+        hud.toggleUpgrades();
+        btnUpgrades.classList.toggle('active', hud.upgradeVisible);
+        if (hud.upgradeVisible) {
+          hud.renderUpgrades(upgradeStates, playerDiamonds, playerBiogas);
+        }
+      }
+    });
+  }
+
+  // ADR-13: Settings close saves
+  const closeSettingsBtn = document.getElementById('btn-close-settings');
+  if (closeSettingsBtn) {
+    closeSettingsBtn.addEventListener('click', () => {
+      if (hud) {
+        const newSettings = hud.readSettings();
+        Object.assign(gameSettings, newSettings);
+        applyVolumeSettings();
+        saveSettings();
+        hud.toggleSettings(false);
+      }
+    });
+  }
+
   // Init audio
   sfx = new SFX();
   music = new Music();
+
+  // ADR-13: Apply saved volume on init
+  applyVolumeSettings();
 
   animate();
 }
@@ -242,6 +356,56 @@ function setupMenuEvents() {
       btnBuildToggle.classList.add('active');
     }
   });
+
+  // ADR-13: Settings button (main menu)
+  btnSettings.addEventListener('click', () => {
+    if (hud) {
+      hud.loadSettings(gameSettings);
+      hud.toggleSettings(true);
+    }
+    // Update volume display values
+    const sfxVal = document.getElementById('sfx-volume-val');
+    const musicVal = document.getElementById('music-volume-val');
+    if (sfxVal) sfxVal.textContent = `${gameSettings.sfxVolume}%`;
+    if (musicVal) musicVal.textContent = `${gameSettings.musicVolume}%`;
+  });
+
+  // ADR-13: Settings volume sliders live update
+  const sfxSlider = document.getElementById('sfx-volume');
+  const musicSlider = document.getElementById('music-volume');
+  const sfxVal = document.getElementById('sfx-volume-val');
+  const musicVal = document.getElementById('music-volume-val');
+  if (sfxSlider) {
+    sfxSlider.addEventListener('input', () => {
+      gameSettings.sfxVolume = parseInt(sfxSlider.value);
+      if (sfxVal) sfxVal.textContent = `${gameSettings.sfxVolume}%`;
+      applyVolumeSettings();
+      saveSettings();
+    });
+  }
+  if (musicSlider) {
+    musicSlider.addEventListener('input', () => {
+      gameSettings.musicVolume = parseInt(musicSlider.value);
+      if (musicVal) musicVal.textContent = `${gameSettings.musicVolume}%`;
+      applyVolumeSettings();
+      saveSettings();
+    });
+  }
+  const difficultySelect = document.getElementById('difficulty-select');
+  if (difficultySelect) {
+    difficultySelect.addEventListener('change', () => {
+      gameSettings.difficulty = difficultySelect.value;
+      saveSettings();
+    });
+  }
+}
+
+/** ADR-13: Apply volume settings to audio system */
+function applyVolumeSettings() {
+  const sfxVol = sfxVolumeMultiplier();
+  const musicVol = musicVolumeMultiplier();
+  if (sfx) sfx.setVolume(sfxVol);
+  if (music) music.setVolume(musicVol);
 }
 
 // ── Game Start/End ─────────────────────────────────────────────────────
@@ -260,6 +424,8 @@ function startGame(mode, opts = {}) {
   resetUnitIds(); resetBuildingIds(); resetResourceIds();
   units = []; buildings = []; resources = []; particles = [];
   pathGrid.blocked.clear();
+  // ADR-10: Clear dynamic obstacles
+  if (pathGrid.dynamicBlocked) pathGrid.dynamicBlocked.clear();
   playerDiamonds = 300;
   playerBiogas = 0;
   selectedBuilding = null;
@@ -267,11 +433,27 @@ function startGame(mode, opts = {}) {
   placementMode = null;
   netPreviousState = null;
   netBroadcastTimer = 0;
+  // ADR-12: Reset upgrades
+  upgradeStates = {
+    weapon: { researched: false, researching: false, progress: 0, duration: 15 },
+    engine: { researched: false, researching: false, progress: 0, duration: 12 },
+    armor:  { researched: false, researching: false, progress: 0, duration: 15 }
+  };
+  // ADR-11: Clear chat
+  if (hud) hud.clearChat();
   if (placementMenuEl) placementMenuEl.classList.add('hidden');
   if (btnBuildToggle) btnBuildToggle.classList.remove('active');
+  if (btnUpgrades) btnUpgrades.classList.remove('active');
+  if (btnChat) btnChat.classList.remove('active');
 
   // HUD
   hud = new HUD();
+
+  // ADR-13: Apply saved volume
+  applyVolumeSettings();
+
+  // Load saved settings into modal
+  hud.loadSettings(gameSettings);
 
   // Fog of war
   fogPlayer = new FogOfWar(MAP_SIZE, 0);
@@ -335,6 +517,10 @@ function startGame(mode, opts = {}) {
           processCommand(data.x, data.z);
         }
       },
+      // ADR-11: Chat callback for host
+      onChat: (sender, message) => {
+        hud.addChatMessage(sender, message);
+      },
       onError: (msg) => {
         console.warn('[Net]', msg);
       }
@@ -356,6 +542,10 @@ function startGame(mode, opts = {}) {
           waitingOverlay.classList.add('hidden');
         }
         applyRemoteState(state);
+      },
+      // ADR-11: Chat callback for guest
+      onChat: (sender, message) => {
+        hud.addChatMessage(sender, message);
       },
       onError: (msg) => {
         console.warn('[Net]', msg);
@@ -792,6 +982,124 @@ function updateProduction() {
   }
 }
 
+/**
+ * ADR-12: Handle researching an upgrade
+ * @param {CustomEvent} e
+ */
+function onResearchUpgrade(e) {
+  const { type, diamonds, biogas } = e.detail;
+  const state = upgradeStates[type];
+  if (!state || state.researched || state.researching) return;
+  if (playerDiamonds < diamonds || playerBiogas < biogas) return;
+
+  // Deduct resources
+  playerDiamonds -= diamonds;
+  playerBiogas -= biogas;
+
+  // Start researching
+  state.researching = true;
+  state.progress = 0;
+  sfx.play('build');
+
+  hud.addChatMessage('System', `Researching ${type} upgrade...`);
+}
+
+/**
+ * ADR-12: Update research progress each frame
+ * @param {number} dt
+ */
+function updateResearch(dt) {
+  for (const key of Object.keys(upgradeStates)) {
+    const state = upgradeStates[key];
+    if (!state.researching) continue;
+
+    state.progress += dt / state.duration;
+    if (state.progress >= 1) {
+      state.progress = 1;
+      state.researching = false;
+      state.researched = true;
+
+      // Apply upgrade to all existing player units
+      for (const u of units) {
+        if (u.team === 0 && u.alive) {
+          u.applyUpgrade(key);
+        }
+      }
+
+      hud.addChatMessage('System', `${key} upgrade complete!`);
+      sfx.play('build');
+    }
+  }
+}
+
+/**
+ * ADR-9: Spawn death particles at world position
+ * @param {number} x
+ * @param {number} z
+ * @param {number} [color] - particle color (default: random warm colors)
+ */
+function spawnDeathParticles(x, z, color) {
+  const count = 15 + Math.floor(Math.random() * 8);
+  for (let i = 0; i < count; i++) {
+    const size = 0.15 + Math.random() * 0.3;
+    const geo = new THREE.SphereGeometry(size, 4, 4);
+    const hue = color ? new THREE.Color(color).getHSL({ h: 0, s: 0, l: 0 }).h : (0.05 + Math.random() * 0.1);
+    const mat = new THREE.MeshBasicMaterial({
+      color: color || new THREE.Color().setHSL(hue, 0.9, 0.5),
+      transparent: true,
+      opacity: 1
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, 1 + Math.random() * 2, z);
+    scene.add(mesh);
+
+    particles.push({
+      mesh,
+      life: 0.6 + Math.random() * 0.6,
+      maxLife: 0.6 + Math.random() * 0.6,
+      velocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 20,
+        3 + Math.random() * 8,
+        (Math.random() - 0.5) * 20
+      ),
+      gravity: -15
+    });
+  }
+}
+
+/**
+ * ADR-9: Spawn hit/combat particles at world position
+ * @param {number} x
+ * @param {number} z
+ */
+function spawnHitParticles(x, z) {
+  const count = 4 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < count; i++) {
+    const size = 0.08 + Math.random() * 0.12;
+    const geo = new THREE.SphereGeometry(size, 3, 3);
+    const mat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color().setHSL(0.1 + Math.random() * 0.05, 1, 0.6),
+      transparent: true,
+      opacity: 1
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x + (Math.random() - 0.5) * 1, 1 + Math.random(), z + (Math.random() - 0.5) * 1);
+    scene.add(mesh);
+
+    particles.push({
+      mesh,
+      life: 0.2 + Math.random() * 0.3,
+      maxLife: 0.2 + Math.random() * 0.3,
+      velocity: new THREE.Vector3(
+        (Math.random() - 0.5) * 8,
+        1 + Math.random() * 3,
+        (Math.random() - 0.5) * 8
+      ),
+      gravity: -10
+    });
+  }
+}
+
 /** Create a visual command indicator ring on the ground */
 function addCommandIndicator(x, z, color) {
   const geo = new THREE.RingGeometry(0.5, 0.8, 16);
@@ -971,6 +1279,22 @@ function handleInput() {
 function update(dt, time) {
   handleInput();
 
+  // ADR-8: Update shared clock time for unit animations
+  clockTime = clock.getElapsedTime();
+
+  // ADR-10: Compute dynamic obstacles (moving units block pathfinding cells)
+  if (!pathGrid.dynamicBlocked) pathGrid.dynamicBlocked = new Set();
+  pathGrid.dynamicBlocked.clear();
+  for (const u of units) {
+    if (u.alive && u.state !== 'idle') {
+      const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
+      pathGrid.dynamicBlocked.add(`${g.x},${g.y}`);
+    }
+  }
+
+  // ADR-12: Update research progress
+  updateResearch(dt);
+
   // ── Placement ghost mesh update ──
   if (placementMode) {
     const ndc = input.getMouse();
@@ -1024,9 +1348,11 @@ function update(dt, time) {
   }
 
   // ADR-3: Play explosion SFX for units that just died this frame
+  // ADR-9: Spawn death particles for units that just died
   for (const u of units) {
     if (u._wasAlive && !u.alive) {
       sfx.play('explosion');
+      spawnDeathParticles(u.x, u.z, u.team === 0 ? 0x4488ff : 0xff4444);
     }
   }
 
@@ -1050,9 +1376,11 @@ function update(dt, time) {
     b.updateCombat(dt, units);
   }
   // ADR-3: Play explosion SFX for buildings that just died this frame
+  // ADR-9: Spawn death particles for buildings that just died
   for (const b of buildings) {
     if (b._wasAlive && !b.alive) {
       sfx.play('explosion');
+      spawnDeathParticles(b.x, b.z, 0xffaa00);
     }
   }
   buildings = buildings.filter(b => b.alive || b.deathTimer > 0);
@@ -1066,11 +1394,23 @@ function update(dt, time) {
     r.syncMesh();
   }
 
-  // Particles
+  // ADR-9: Update particles with gravity and fade
   for (const p of particles) {
     p.life -= dt;
+    // Apply gravity
+    p.velocity.y += (p.gravity || -15) * dt;
     p.mesh.position.add(p.velocity.clone().multiplyScalar(dt));
-    if (p.life <= 0 && p.mesh) scene.remove(p.mesh);
+    // Fade out based on remaining life
+    const lifeRatio = p.life / (p.maxLife || 1);
+    p.mesh.material.opacity = Math.max(0, lifeRatio);
+    // Scale down as particle dies
+    const scale = 0.5 + lifeRatio * 0.5;
+    p.mesh.scale.set(scale, scale, scale);
+    if (p.life <= 0 && p.mesh) {
+      scene.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+    }
   }
   particles = particles.filter(p => p.life > 0);
 
@@ -1254,6 +1594,11 @@ function update(dt, time) {
   // Update placement menu affordability
   if (placementMenuEl && !placementMenuEl.classList.contains('hidden')) {
     hud.updatePlacementMenu(playerFaction, playerDiamonds, playerBiogas);
+  }
+
+  // ADR-12: Update upgrade panel if visible
+  if (hud.upgradeVisible) {
+    hud.renderUpgrades(upgradeStates, playerDiamonds, playerBiogas);
   }
 }
 

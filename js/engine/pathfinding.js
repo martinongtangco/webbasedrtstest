@@ -56,7 +56,7 @@ class MinHeap {
 }
 
 /**
- * @param {{blocked: Set<string>, width: number, height: number}} grid
+ * @param {{blocked: Set<string>, width: number, height: number, dynamicBlocked?: Set<string>}} grid
  * @param {{x: number, y: number}} start
  * @param {{x: number, y: number}} goal
  * @param {object} opts
@@ -69,6 +69,8 @@ export function astar(grid, start, goal, opts = {}) {
   const goalKey = `${goal.x},${goal.y}`;
 
   if (grid.blocked.has(goalKey)) return null;
+  // ADR-10: Also check dynamic obstacles (moving units)
+  if (grid.dynamicBlocked && grid.dynamicBlocked.has(goalKey)) return null;
 
   const dirs = allowDiagonal
     ? [
@@ -111,6 +113,8 @@ export function astar(grid, start, goal, opts = {}) {
 
       const neighborKey = `${nx},${ny}`;
       if (grid.blocked.has(neighborKey)) continue;
+      // ADR-10: Check dynamic obstacles
+      if (grid.dynamicBlocked && grid.dynamicBlocked.has(neighborKey)) continue;
       if (closedSet.has(neighborKey)) continue;
 
       const moveCost = allowDiagonal && dx !== 0 && dy !== 0 ? 1.414 : 1;

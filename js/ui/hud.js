@@ -16,6 +16,42 @@ export class HUD {
     // Placement menu
     this.placementMenuEl = document.getElementById('placement-menu');
 
+    // ADR-11: Chat panel
+    this.chatPanelEl = document.getElementById('chat-panel');
+    this.chatMessagesEl = document.getElementById('chat-messages');
+    this.chatInputEl = document.getElementById('chat-input');
+    this.chatVisible = false;
+    this._chatHistory = [];
+
+    // ADR-11: Chat textarea event listeners
+    if (this.chatInputEl) {
+      this.chatInputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          const msg = this.chatInputEl.value.trim();
+          if (msg) {
+            window.dispatchEvent(new CustomEvent('send_chat', { detail: { message: msg } }));
+            this.chatInputEl.value = '';
+          }
+        }
+        if (e.key === 'Escape') {
+          this.toggleChat(false);
+        }
+      });
+    }
+
+    // ADR-12: Upgrade panel
+    this.upgradePanelEl = document.getElementById('upgrade-panel');
+    this.upgradeVisible = false;
+
+    // ADR-13: Settings modal
+    this.settingsModalEl = document.getElementById('settings-modal');
+    this.settingsVisible = false;
+    if (this.settingsModalEl) {
+      const btnClose = document.getElementById('btn-close-settings');
+      if (btnClose) btnClose.addEventListener('click', () => this.toggleSettings(false));
+    }
+
     // Constants for world↔minimap conversion
     this.MAP_SIZE = 96;       // tiles
     this.TILE_SIZE = 4;       // world units per tile
@@ -182,5 +218,179 @@ export class HUD {
       const canAfford = diamonds >= def.cost.diamonds && biogas >= (def.cost.biogas || 0);
       btn.disabled = !canAfford;
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ADR-11: Chat UI
+  // ═══════════════════════════════════════════════════════════
+
+  /** Toggle the chat panel visibility */
+  toggleChat(forceState) {
+    this.chatVisible = typeof forceState === 'boolean' ? forceState : !this.chatVisible;
+    if (this.chatPanelEl) {
+      this.chatPanelEl.classList.toggle('hidden', !this.chatVisible);
+    }
+    if (this.chatVisible && this.chatInputEl) {
+      this.chatInputEl.value = '';
+    }
+  }
+
+  /** Add a chat message to the display */
+  addChatMessage(sender, message) {
+    if (!this.chatMessagesEl) return;
+
+    // Store in history (max 100 messages)
+    this._chatHistory.push({ sender, message });
+    if (this._chatHistory.length > 100) this._chatHistory.shift();
+
+    const div = document.createElement('div');
+    div.className = 'chat-line';
+    const senderSpan = document.createElement('span');
+    senderSpan.className = 'chat-sender';
+    senderSpan.textContent = `[${sender}]`;
+    const msgSpan = document.createElement('span');
+    msgSpan.className = 'chat-text';
+    msgSpan.textContent = message;
+    div.appendChild(senderSpan);
+    div.appendChild(msgSpan);
+    this.chatMessagesEl.appendChild(div);
+
+    // Keep only last 50 visible messages
+    while (this.chatMessagesEl.children.length > 50) {
+      this.chatMessagesEl.removeChild(this.chatMessagesEl.firstChild);
+    }
+
+    // Auto-scroll to bottom
+    this.chatMessagesEl.scrollTop = this.chatMessagesEl.scrollHeight;
+  }
+
+  /** Clear chat history */
+  clearChat() {
+    if (this.chatMessagesEl) {
+      this.chatMessagesEl.innerHTML = '';
+    }
+    this._chatHistory.length = 0;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ADR-12: Upgrade Panel
+  // ═══════════════════════════════════════════════════════════
+
+  /** Toggle upgrade panel visibility */
+  toggleUpgrades(forceState) {
+    this.upgradeVisible = typeof forceState === 'boolean' ? forceState : !this.upgradeVisible;
+    if (this.upgradePanelEl) {
+      this.upgradePanelEl.classList.toggle('hidden', !this.upgradeVisible);
+    }
+  }
+
+  /**
+   * Render the upgrade panel with current upgrade states
+   * @param {object} upgradeStates - { weapon: { researched: bool, progress: 0-1 }, ... }
+   * @param {number} diamonds
+   * @param {number} biogas
+   */
+  renderUpgrades(upgradeStates, diamonds, biogas) {
+    if (!this.upgradePanelEl) return;
+    this.upgradePanelEl.innerHTML = '';
+
+    const upgrades = [
+      { key: 'weapon', name: '⚔️ Weapon Upgrade', desc: '+20% damage', diamonds: 200, biogas: 50 },
+      { key: 'engine', name: '⚙️ Engine Upgrade', desc: '+15% speed', diamonds: 150, biogas: 30 },
+      { key: 'armor', name: '🛡️ Armor Upgrade', desc: '+25% HP', diamonds: 180, biogas: 40 }
+    ];
+
+    for (const u of upgrades) {
+      const state = upgradeStates[u.key];
+      const div = document.createElement('div');
+      div.className = 'upgrade-item';
+
+      const header = document.createElement('div');
+      header.className = 'upgrade-header';
+      header.textContent = u.name;
+
+      const desc = document.createElement('div');
+      desc.className = 'upgrade-desc';
+      desc.textContent = `${u.desc} — 💎${u.diamonds} ⚡${u.biogas}`;
+
+      if (state && state.researched) {
+        const done = document.createElement('div');
+        done.className = 'upgrade-done';
+        done.textContent = '✓ Researched';
+        div.appendChild(header);
+        div.appendChild(desc);
+        div.appendChild(done);
+      } else if (state && state.researching) {
+        const progress = document.createElement('div');
+        progress.className = 'upgrade-progress';
+        const bar = document.createElement('div');
+        bar.className = 'upgrade-progress-bar';
+        const fill = document.createElement('div');
+        fill.className = 'upgrade-progress-fill';
+        fill.style.width = `${(state.progress || 0) * 100}%`;
+        bar.appendChild(fill);
+        progress.appendChild(bar);
+        const label = document.createElement('span');
+        label.textContent = `Researching... ${Math.floor((state.progress || 0) * 100)}%`;
+        progress.appendChild(label);
+        div.appendChild(header);
+        div.appendChild(desc);
+        div.appendChild(progress);
+      } else {
+        const btn = document.createElement('button');
+        btn.className = 'upgrade-btn';
+        const canAfford = diamonds >= u.diamonds && biogas >= u.biogas;
+        btn.disabled = !canAfford;
+        btn.textContent = canAfford ? 'Research' : 'Can\'t afford';
+        btn.addEventListener('click', () => {
+          window.dispatchEvent(new CustomEvent('research_upgrade', { detail: { type: u.key, diamonds: u.diamonds, biogas: u.biogas } }));
+        });
+        div.appendChild(header);
+        div.appendChild(desc);
+        div.appendChild(btn);
+      }
+
+      this.upgradePanelEl.appendChild(div);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ADR-13: Settings Modal
+  // ═══════════════════════════════════════════════════════════
+
+  /** Toggle settings modal visibility */
+  toggleSettings(forceState) {
+    this.settingsVisible = typeof forceState === 'boolean' ? forceState : !this.settingsVisible;
+    if (this.settingsModalEl) {
+      this.settingsModalEl.classList.toggle('hidden', !this.settingsVisible);
+    }
+  }
+
+  /**
+   * Load settings into the modal's controls
+   * @param {object} settings - { sfxVolume, musicVolume, difficulty }
+   */
+  loadSettings(settings) {
+    const sfxSlider = document.getElementById('sfx-volume');
+    const musicSlider = document.getElementById('music-volume');
+    const difficultySelect = document.getElementById('difficulty-select');
+    if (sfxSlider) sfxSlider.value = settings.sfxVolume ?? 70;
+    if (musicSlider) musicSlider.value = settings.musicVolume ?? 50;
+    if (difficultySelect) difficultySelect.value = settings.difficulty ?? 'medium';
+  }
+
+  /**
+   * Read current settings from the modal's controls
+   * @returns {object}
+   */
+  readSettings() {
+    const sfxSlider = document.getElementById('sfx-volume');
+    const musicSlider = document.getElementById('music-volume');
+    const difficultySelect = document.getElementById('difficulty-select');
+    return {
+      sfxVolume: sfxSlider ? parseInt(sfxSlider.value) : 70,
+      musicVolume: musicSlider ? parseInt(musicSlider.value) : 50,
+      difficulty: difficultySelect ? difficultySelect.value : 'medium'
+    };
   }
 }

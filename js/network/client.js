@@ -23,6 +23,8 @@ export class NetworkClient {
     this.onGameState = opts.onGameState || (() => {});
     this.onPlayerInput = opts.onPlayerInput || (() => {});
     this.onError = opts.onError || ((msg) => console.warn('[Net]', msg));
+    // ADR-11: Chat callback
+    this.onChat = opts.onChat || ((sender, message) => {});
 
     // Pending messages (queued until connected)
     this._queue = [];
@@ -121,6 +123,11 @@ export class NetworkClient {
         }
         break;
 
+      // ADR-11: Chat message handling
+      case 'chat':
+        this.onChat(msg.sender || 'Opponent', msg.message);
+        break;
+
       default:
         break;
     }
@@ -150,6 +157,17 @@ export class NetworkClient {
    */
   sendGameState(state) {
     this.send({ type: 'game_state', ...state });
+  }
+
+  /**
+   * ADR-11: Send a chat message
+   * @param {string} message
+   */
+  sendChat(message) {
+    const sender = this.role || 'player';
+    this.send({ type: 'chat', sender, message });
+    // Also show locally
+    if (this.onChat) this.onChat(sender, message);
   }
 
   disconnect() {

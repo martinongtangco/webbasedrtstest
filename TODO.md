@@ -2,7 +2,7 @@
 
 Kanban board for tracking tasks. Update status columns as work progresses.
 
-**Last Ticket Number:** 20
+**Last Ticket Number:** 27
 
 ## Legend
 
@@ -30,12 +30,7 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🟡 Medium Priority — Polish & Features
 
-- [ ] **ADR-8 — Unit walking/attack animations** — Units are static meshes; add bobbing/rotation during movement and aim animation during attacks. `js/entities/units.js`
-- [ ] **ADR-9 — Particle effects for combat and death** — Particle system exists (command indicator rings) but death/combat particles are not spawned. `main.js`, `js/entities/units.js`
-- [ ] **ADR-10 — Dynamic pathfinding obstacles** — A* grid is static; moving units should temporarily block grid cells for better pathfinding. `js/engine/pathfinding.js`
-- [ ] **ADR-11 — Chat UI** — WebSocket protocol supports `chat` messages but no client-side chat input or message display exists. `js/ui/hud.js`, `js/network/client.js`
-- [ ] **ADR-12 — Unit upgrades / tech tree** — No upgrade system. Add a researchable upgrade path (e.g., +damage, +speed, +HP). `main.js`, `js/ui/hud.js`
-- [ ] **ADR-13 — Settings / options menu** — No volume sliders, difficulty selection, or graphics quality options. `index.html`, `style.css`, `main.js`
+*(All medium-priority ADRs completed — see Done below)*
 
 ### 🟢 Low Priority — Nice-to-Have
 
@@ -99,3 +94,10 @@ Completed tasks. Move here from Backlog or In Progress when finished.
 - [x] **ADR-6 — Network bandwidth optimization** — Throttled broadcasts from every frame (60fps) to every 100ms (10Hz) = ~6x reduction. Implemented delta snapshots: only sends entities with changed position/HP/alive status, plus new/removed entity lists. Guest `applyRemoteState()` handles both full-state and delta formats. Skips broadcast entirely when nothing changed. `js/main.js`
 - [x] **ADR-7 — Unit selection ring visible through fog** — After fog visibility pass, selected enemy units/buildings have their `selectionRing.visible` forced to `true` independently of mesh visibility. Ring stays visible through fog, mesh body stays hidden. `js/main.js`
 - [x] **ADR-4 to ADR-7 test suite** — Added 4 new test files (59 tests): AI adaptive behavior, building combat algorithm, network delta computation + throttling, fog visibility + selection ring override. Total: 127 tests. `tests/test_adr4_ai.js`, `tests/test_adr5_building_defense.js`, `tests/test_adr6_network_delta.js`, `tests/test_adr7_fog_selection.js`
+- [x] **ADR-8 — Unit walking/attack animations** — Added `animOffset` (unique per-unit phase), `facing` (rotation direction), `wasMoving` (bobbing flag). `syncMesh()` applies smooth Y-axis rotation toward facing and vertical sine-wave bobbing (amplitude 0.15) during moving/attacking/gathering/returning states. Gentle bobbing (0.08) during healing. Facing computed from path deltas in `updateMovement`, `updateGathering`, and `updateHealing`. `js/entities/units.js`, `js/main.js`
+- [x] **ADR-9 — Particle effects for combat and death** — Added `spawnDeathParticles(x, z, color)` (15-22 particles, warm colors, gravity -15, lifetime 0.6-1.2s) and `spawnHitParticles(x, z)` (4-6 particles, sparks, gravity -10, lifetime 0.2-0.5s). Death particles spawned when units/buildings die. Hit particles spawned via `unit_hit` custom event from `Unit.updateCombat()`. Particles fade by life ratio and scale down as they die. `js/main.js`, `js/entities/units.js`
+- [x] **ADR-10 — Dynamic pathfinding obstacles** — Added `dynamicBlocked` Set to pathGrid, computed each frame from moving unit positions (alive + non-idle). `astar()` checks both `grid.blocked` and `grid.dynamicBlocked`. Idle/dead units excluded. `js/engine/pathfinding.js`, `js/main.js`
+- [x] **ADR-11 — Chat UI** — Added chat panel (`#chat-panel`) with message history (100 max), textarea input. Toggle via Chat button or Enter key. Close with Escape. `NetworkClient.sendChat()` sends `chat` type messages over WebSocket. `onChat` callback receives messages. System messages for upgrades. `js/ui/hud.js`, `js/network/client.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-12 — Unit upgrades / tech tree** — Three upgrades: Weapon (+20% DMG, 200💎/50⚡, 15s), Engine (+15% SPD, 150💎/30⚡, 12s), Armor (+25% HP, 180💎/40⚡, 15s). Upgrade panel toggled via Upgrades button. `Unit.applyUpgrade()` modifies stats directly. On completion, all existing player units receive the upgrade. New units auto-get upgraded stats. `js/entities/units.js`, `js/ui/hud.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-13 — Settings / options menu** — Settings modal with SFX volume slider (0-100%), Music volume slider (0-100%), Difficulty select (easy/medium/hard). Volume mapped to Tone.js dB: SFX 0→-30dB/1→0dB, Music 0→-30dB/1→-18dB. Settings persisted to `localStorage`. Applied to audio on change. `js/audio/sfx.js`, `js/audio/music.js`, `js/ui/hud.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-8 to ADR-13 test suite** — Added `tests/test_adr8_to_13.js` (39 tests): unit animation state/bobbing/facing, particle structure/physics/fade, dynamic obstacle computation/clearing, chat message storage/limits/clearing, upgrade stats/research/affordability, settings defaults/volume mapping/persistence. Total: 166 tests. `tests/test_adr8_to_13.js`
