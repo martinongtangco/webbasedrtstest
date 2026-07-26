@@ -14,7 +14,7 @@ export class NetworkClient {
     this.mode = mode;
     this.ws = null;
     this.connected = false;
-    this.role = null; // 'host' | 'guest'
+    this.role = null; // 'host' | 'guest' | 'spectator'
     this.sessionId = null;
 
     // Callbacks
@@ -25,6 +25,9 @@ export class NetworkClient {
     this.onError = opts.onError || ((msg) => console.warn('[Net]', msg));
     // ADR-11: Chat callback
     this.onChat = opts.onChat || ((sender, message) => {});
+    // ADR-15: Spectator callbacks
+    this.onSpectatorConnected = opts.onSpectatorConnected || (() => {});
+    this.onSpectatorDisconnected = opts.onSpectatorDisconnected || (() => {});
     // ADR-19: Connection quality callback
     this.onPingUpdate = opts.onPingUpdate || ((pingMs, quality) => {});
 
@@ -54,6 +57,16 @@ export class NetworkClient {
    * @param {string} hostIp — e.g. "192.168.1.50:8181"
    */
   connectGuest(hostIp) {
+    const proto = 'ws:';
+    const url = `${proto}//${hostIp}`;
+    this._connect(url);
+  }
+
+  /**
+   * ADR-15: Connect as spectator to a running game
+   * @param {string} hostIp — e.g. "192.168.1.50:8181"
+   */
+  connectSpectator(hostIp) {
     const proto = 'ws:';
     const url = `${proto}//${hostIp}`;
     this._connect(url);
@@ -126,6 +139,15 @@ export class NetworkClient {
         if (this.role === 'host') {
           this.onOpponentLeft();
         }
+        break;
+
+      // ADR-15: Spectator connection events
+      case 'spectator_connected':
+        this.onSpectatorConnected();
+        break;
+
+      case 'spectator_disconnected':
+        this.onSpectatorDisconnected();
         break;
 
       case 'game_state':

@@ -34,7 +34,6 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🟢 Low Priority — Nice-to-Have
 
-- [ ] **ADR-15 — Spectator mode** — Third player joins and watches without controlling. `js/network/client.js`, `main.js`
 - [ ] **ADR-16 — Replay system** — Record game events and replay later. New module.
 - [ ] **ADR-17 — NAT traversal (WebRTC)** — Enable play across different networks, not just LAN. `server.js`, `js/network/client.js`
 
@@ -51,7 +50,6 @@ Tasks currently being worked on. *(empty)*
 Tasks that depend on other work being completed first.
 
 - [ ] **ADR-16 — Replay system** — Blocked on: event recording infrastructure, deterministic simulation
-- [ ] **ADR-15 — Spectator mode** — ADR-1 resolved; still needs spectator-specific logic (read-only state sync, no input forwarding). `js/network/client.js`, `js/main.js`
 - [ ] **ADR-17 — NAT traversal** — Blocked on: core LAN multiplayer needs to be rock-solid first
 
 ---
@@ -102,3 +100,5 @@ Completed tasks. Move here from Backlog or In Progress when finished.
 - [x] **ADR-19 — Connection quality indicator** — Added ping monitoring to `NetworkClient`: periodic ping/ping_reply exchange every 2s, rolling 5-sample average. Quality levels: excellent (<50ms), good (<100ms), fair (<200ms), poor (>200ms), disconnected. HUD indicator shows colored dot + ping ms in resource bar. `js/network/client.js`, `js/main.js`, `index.html`, `style.css`
 - [x] **ADR-20 — Save/load game state** — Added `js/engine/saveSystem.js` with `createSaveState()` (serializes alive entities, resources, upgrades, map, mode), `saveGame()`/`loadGame()` to localStorage, named slots, `downloadSave()`/`loadFromFile()` for file portability, `listSaves()`/`deleteSave()`. Save/Load buttons in HUD open modal with Quick Save/Load, Download, Upload, and save list with Load/Del actions. `applySaveState()` restores full game. `js/engine/saveSystem.js`, `js/main.js`, `index.html`, `style.css`
 - [x] **ADR-14 to ADR-20 test suite** — Added `tests/test_adr14_to_20.js` (24 tests): map definitions/fields/uniqueness/resources/base positions, model registry/paths/placeholders, ping quality thresholds/averaging/windowing, save state serialization/load/delete/list/invalid rejection. Total: 190 tests. `tests/test_adr14_to_20.js`
+- [x] **ADR-15 — Spectator mode** — Third player joins a running game as read-only viewer. Server: session.spectators[] array, `relayToSpectators()` for game_state, spectator_connected/disconnected events, host disconnect closes spectators. Client: `'spectator'` NetworkClient mode with `connectSpectator()`, `onSpectatorConnected/Disconnected` callbacks. Main: `startGame('spectator')` skips input (handleInput returns early), skips AI/production/unit movement, keeps visual updates (health bars, mesh sync, fog, particles). HUD: interactive buttons hidden (Build, Upgrades, Save, Load), spectating banner shown. `server.js`, `js/network/client.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-15 test suite** — Added `tests/test_adr15_spectator.js` (15 tests): session structure/spectator join/relay/input-ignored/disconnect/clean-up, NetworkClient spectator role, simulation skip/visual keep, neutral game-over, multiple spectators, chat broadcast. Total: 205 tests. `tests/test_adr15_spectator.js`

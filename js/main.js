@@ -92,6 +92,12 @@ const btnBuildToggle = document.getElementById('btn-build-toggle');
 const btnUpgrades = document.getElementById('btn-upgrades');
 // ADR-11: Chat button
 const btnChat = document.getElementById('btn-chat');
+// ADR-15: Spectate UI
+const btnSpectate = document.getElementById('btn-spectate');
+const spectatePanel = document.getElementById('spectate-panel');
+const spectateHostIp = document.getElementById('spectate-host-ip');
+const btnSpectateConnect = document.getElementById('btn-spectate-connect');
+const spectatingBanner = document.getElementById('spectating-banner');
 // ADR-13: Settings button
 const btnSettings = document.getElementById('btn-settings');
 // ADR-14: Map selector
@@ -409,6 +415,16 @@ function setupMenuEvents() {
     const ip = hostIpInput.value.trim();
     if (ip) startGame('guest', { hostIp: ip });
   });
+  // ADR-15: Spectate button
+  if (btnSpectate) {
+    btnSpectate.addEventListener('click', () => spectatePanel.classList.toggle('hidden'));
+  }
+  if (btnSpectateConnect) {
+    btnSpectateConnect.addEventListener('click', () => {
+      const ip = spectateHostIp.value.trim();
+      if (ip) startGame('spectator', { hostIp: ip });
+    });
+  }
   btnCancelHost.addEventListener('click', () => {
     if (gameState === 'waiting') returnToMenu();
   });
@@ -743,6 +759,21 @@ function applySaveState(state) {
   fogEnemy = new FogOfWar(MAP_SIZE, 1);
 }
 
+// ── ADR-15: Disable interactive HUD for spectator mode ──────────────
+function disableInteractiveHUD() {
+  // Hide build-related buttons
+  if (btnBuildToggle) btnBuildToggle.style.display = 'none';
+  if (btnUpgrades) btnUpgrades.style.display = 'none';
+  if (btnSaveGame) btnSaveGame.style.display = 'none';
+  if (btnLoadGame) btnLoadGame.style.display = 'none';
+  // Hide placement menu and build menu
+  if (placementMenuEl) placementMenuEl.classList.add('hidden');
+  const buildMenuEl = document.getElementById('build-menu');
+  if (buildMenuEl) buildMenuEl.style.display = 'none';
+  const unitInfoEl = document.getElementById('unit-info');
+  if (unitInfoEl) unitInfoEl.style.display = 'none';
+}
+
 // ── Game Start/End ─────────────────────────────────────────────────────
 function startGame(mode, opts = {}) {
   // Init audio on user gesture
@@ -900,6 +931,45 @@ function startGame(mode, opts = {}) {
       }
     });
     net.connectGuest(opts.hostIp || 'localhost:8181');
+  }
+  // ADR-15: Spectator mode
+  else if (mode === 'spectator') {
+    gameState = 'waiting';
+    netWaiting = true;
+    waitingOverlay.classList.remove('hidden');
+    hostIpDisplay.textContent = `Spectating ${opts.hostIp}...`;
+    net = new NetworkClient('spectator', {
+      onOpponentLeft: () => {
+        if (gameState === 'playing') endGame(false);
+      },
+      onGameState: (state) => {
+        if (gameState === 'waiting') {
+          gameState = 'playing';
+          netWaiting = false;
+          waitingOverlay.classList.add('hidden');
+          // Show spectating banner
+          if (spectatingBanner) spectatingBanner.classList.remove('hidden');
+          // Disable interactive HUD elements
+          disableInteractiveHUD();
+        }
+        applyRemoteState(state);
+      },
+      // ADR-11: Chat callback for spectator
+      onChat: (sender, message) => {
+        hud.addChatMessage(sender, message);
+      },
+      // ADR-19: Ping update callback for spectator
+      onPingUpdate: (pingMs, quality) => {
+        // Indicator updated in main loop via updateConnectionIndicator()
+      },
+      onError: (msg) => {
+        console.warn('[Net]', msg);
+        netWaiting = false;
+        gameState = 'menu';
+        returnToMenu();
+      }
+    });
+    net.connectSpectator(opts.hostIp || 'localhost:8181');
   }
 }
 
@@ -1086,9 +1156,22 @@ function returnToMenu() {
   waitingOverlay.classList.add('hidden');
   placementMode = null;
 
+  // ADR-15: Restore HUD elements hidden during spectator mode
+  if (btnBuildToggle) btnBuildToggle.style.display = '';
+  if (btnUpgrades) btnUpgrades.style.display = '';
+  if (btnSaveGame) btnSaveGame.style.display = '';
+  if (btnLoadGame) btnLoadGame.style.display = '';
+  const buildMenuEl = document.getElementById('build-menu');
+  if (buildMenuEl) buildMenuEl.style.display = '';
+  const unitInfoEl = document.getElementById('unit-info');
+  if (unitInfoEl) unitInfoEl.style.display = '';
+  if (spectatingBanner) spectatingBanner.classList.add('hidden');
+
   // Reset faction UI
   factionButtons.forEach(b => b.classList.remove('selected'));
   btnSkirmish.disabled = true;
+  // ADR-15: Reset spectate panel
+  if (spectatePanel) spectatePanel.classList.add('hidden');
 
   // Clean up input listeners to avoid accumulation across sessions
   input.dispose();
@@ -1113,8 +1196,14 @@ function endGame(victory) {
 
   gameState = 'gameover';
   gameOverEl.classList.remove('hidden');
-  gameOverEl.classList.add(victory ? 'victory' : 'defeat');
-  gameOverTitle.textContent = victory ? 'VICTORY' : 'DEFEAT';
+  // ADR-15: Spectator sees neutral game over
+  if (gameMode === 'spectator') {
+    gameOverTitle.textContent = 'GAME OVER';
+    gameOverEl.classList.add('victory'); // use neutral styling
+  } else {
+    gameOverEl.classList.add(victory ? 'victory' : 'defeat');
+    gameOverTitle.textContent = victory ? 'VICTORY' : 'DEFEAT';
+  }
   music.stop();
 }
 
@@ -1581,6 +1670,9 @@ function processPlacementInput(leftClick, rightClick, selBox) {
 }
 
 function handleInput() {
+  // ADR-15: Spectator mode — all input is read-only, skip processing
+  if (gameMode === 'spectator') return;
+
   const leftClick = input.getLeftClick();
   const rightClick = input.getRightClick();
   const selBox = input.getSelectionBox();
@@ -1627,18 +1719,24 @@ function update(dt, time) {
   // ADR-8: Update shared clock time for unit animations
   clockTime = clock.getElapsedTime();
 
-  // ADR-10: Compute dynamic obstacles (moving units block pathfinding cells)
-  if (!pathGrid.dynamicBlocked) pathGrid.dynamicBlocked = new Set();
-  pathGrid.dynamicBlocked.clear();
-  for (const u of units) {
-    if (u.alive && u.state !== 'idle') {
-      const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
-      pathGrid.dynamicBlocked.add(`${g.x},${g.y}`);
+  // ADR-15: Spectator skips local simulation (no AI, no unit movement, no production)
+  if (gameMode !== 'spectator') {
+    // ADR-10: Compute dynamic obstacles (moving units block pathfinding cells)
+    if (!pathGrid.dynamicBlocked) pathGrid.dynamicBlocked = new Set();
+    pathGrid.dynamicBlocked.clear();
+    for (const u of units) {
+      if (u.alive && u.state !== 'idle') {
+        const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
+        pathGrid.dynamicBlocked.add(`${g.x},${g.y}`);
+      }
     }
-  }
 
-  // ADR-12: Update research progress
-  updateResearch(dt);
+    // ADR-12: Update research progress
+    updateResearch(dt);
+  } else {
+    // Spectator: just keep mesh sync for smooth rendering
+    // (no movement/combat/production, but still update visuals)
+  }
 
   // ── Placement ghost mesh update ──
   if (placementMode) {
@@ -1671,72 +1769,106 @@ function update(dt, time) {
     }
   }
 
-  // Track which units were alive before this frame (for death SFX — ADR-3)
-  for (const u of units) u._wasAlive = u.alive;
+  // ADR-15: Spectator mode — skip simulation, only update visuals
+  if (gameMode !== 'spectator') {
+    // Track which units were alive before this frame (for death SFX — ADR-3)
+    for (const u of units) u._wasAlive = u.alive;
 
-  // Update units
-  for (const u of units) {
-    if (!u.alive) {
-      u.deathTimer -= dt;
-      if (u.deathTimer <= 0 && u.mesh) { scene.remove(u.mesh); }
-      continue;
+    // Update units
+    for (const u of units) {
+      if (!u.alive) {
+        u.deathTimer -= dt;
+        if (u.deathTimer <= 0 && u.mesh) { scene.remove(u.mesh); }
+        continue;
+      }
+
+      u.updateMovement(dt, pathGrid, TILE_SIZE, WORLD_HALF);
+      u.updateCombat(dt, units, pathGrid, TILE_SIZE, WORLD_HALF);
+      u.updateHealing(dt, units);
+      u.updateAutoAttack(dt, units);
+      u.updateGathering(dt, TILE_SIZE, WORLD_HALF);
+      u.updateHealthBar();
+      u.syncMesh();
+      u.billboardBars(camera.camera);
     }
 
-    u.updateMovement(dt, pathGrid, TILE_SIZE, WORLD_HALF);
-    u.updateCombat(dt, units, pathGrid, TILE_SIZE, WORLD_HALF);
-    u.updateHealing(dt, units);
-    u.updateAutoAttack(dt, units);
-    u.updateGathering(dt, TILE_SIZE, WORLD_HALF);
-    u.updateHealthBar();
-    u.syncMesh();
-    u.billboardBars(camera.camera);
-  }
-
-  // ADR-3: Play explosion SFX for units that just died this frame
-  // ADR-9: Spawn death particles for units that just died
-  for (const u of units) {
-    if (u._wasAlive && !u.alive) {
-      sfx.play('explosion');
-      spawnDeathParticles(u.x, u.z, u.team === 0 ? 0x4488ff : 0xff4444);
+    // ADR-3: Play explosion SFX for units that just died this frame
+    // ADR-9: Spawn death particles for units that just died
+    for (const u of units) {
+      if (u._wasAlive && !u.alive) {
+        sfx.play('explosion');
+        spawnDeathParticles(u.x, u.z, u.team === 0 ? 0x4488ff : 0xff4444);
+      }
     }
-  }
 
-  // Remove dead units
-  units = units.filter(u => u.alive || u.deathTimer > 0);
+    // Remove dead units
+    units = units.filter(u => u.alive || u.deathTimer > 0);
 
-  // Track which buildings were alive (for death SFX — ADR-3)
-  for (const b of buildings) b._wasAlive = b.alive;
+    // Track which buildings were alive (for death SFX — ADR-3)
+    for (const b of buildings) b._wasAlive = b.alive;
 
-  // Update buildings
-  for (const b of buildings) {
-    if (!b.alive) {
-      b.deathTimer -= dt;
-      if (b.deathTimer <= 0 && b.mesh) scene.remove(b.mesh);
-      continue;
+    // Update buildings
+    for (const b of buildings) {
+      if (!b.alive) {
+        b.deathTimer -= dt;
+        if (b.deathTimer <= 0 && b.mesh) scene.remove(b.mesh);
+        continue;
+      }
+      b.updateHealthBar();
+      b.syncMesh();
+      b.billboardBars(camera.camera);
+      // ADR-5: Building auto-defense — buildings with attack stats fire at nearby enemies
+      b.updateCombat(dt, units);
     }
-    b.updateHealthBar();
-    b.syncMesh();
-    b.billboardBars(camera.camera);
-    // ADR-5: Building auto-defense — buildings with attack stats fire at nearby enemies
-    b.updateCombat(dt, units);
+  } else {
+    // ADR-15: Spectator — just update visuals (health bars, mesh sync, billboards)
+    for (const u of units) {
+      if (!u.alive) {
+        u.deathTimer -= dt;
+        if (u.deathTimer <= 0 && u.mesh) { scene.remove(u.mesh); }
+        continue;
+      }
+      u.updateHealthBar();
+      u.syncMesh();
+      u.billboardBars(camera.camera);
+    }
+    for (const b of buildings) {
+      if (!b.alive) {
+        b.deathTimer -= dt;
+        if (b.deathTimer <= 0 && b.mesh) scene.remove(b.mesh);
+        continue;
+      }
+      b.updateHealthBar();
+      b.syncMesh();
+      b.billboardBars(camera.camera);
+    }
   }
   // ADR-3: Play explosion SFX for buildings that just died this frame
   // ADR-9: Spawn death particles for buildings that just died
-  for (const b of buildings) {
-    if (b._wasAlive && !b.alive) {
-      sfx.play('explosion');
-      spawnDeathParticles(b.x, b.z, 0xffaa00);
+  // ADR-15: Spectator skips building death SFX/particles
+  if (gameMode !== 'spectator') {
+    for (const b of buildings) {
+      if (b._wasAlive && !b.alive) {
+        sfx.play('explosion');
+        spawnDeathParticles(b.x, b.z, 0xffaa00);
+      }
     }
+    buildings = buildings.filter(b => b.alive || b.deathTimer > 0);
+
+    // Production
+    updateProduction();
+  } else {
+    buildings = buildings.filter(b => b.alive || b.deathTimer > 0);
   }
-  buildings = buildings.filter(b => b.alive || b.deathTimer > 0);
 
-  // Production
-  updateProduction();
-
-  // Resources
+  // Resources — ADR-15: spectator still syncs visuals
   for (const r of resources) {
-    r.update(dt, time);
     r.syncMesh();
+  }
+  if (gameMode !== 'spectator') {
+    for (const r of resources) {
+      r.update(dt, time);
+    }
   }
 
   // ADR-9: Update particles with gravity and fade

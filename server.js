@@ -70,8 +70,8 @@ const server = http.createServer((req, res) => {
 // ── WebSocket Server ───────────────────────────────────────────────────
 const wss = new WebSocketServer({ server });
 
-// Active game sessions: each session has up to 2 players
-// Session format: { host: WebSocket, guest: WebSocket|null, tickRate: 100ms }
+// Active game sessions: each session has up to 2 players + spectators
+// Session format: { id, host, guest, spectators: [], createdAt }
 let sessions = new Map(); // ws -> session
 let sessionCounter = 0;
 
@@ -81,6 +81,7 @@ wss.on('connection', (ws, req) => {
 
   // Determine role: if no active session exists, this client becomes the host
   // If a session exists with only a host, this client becomes the guest
+  // If a session has host + guest, this client becomes a spectator (ADR-15)
   let session = null;
   let role = 'host';
 
@@ -93,19 +94,35 @@ wss.on('connection', (ws, req) => {
     }
   }
 
+  // ADR-15: If no open session, look for a full session to spectate
+  if (!session) {
+    for (const [, s] of sessions) {
+      if (s.host && s.guest) {
+        session = s;
+        role = 'spectator';
+        break;
+      }
+    }
+  }
+
   if (!session) {
     // Create new session, this client is the host
     session = {
       id: ++sessionCounter,
       host: ws,
       guest: null,
+      spectators: [],
       createdAt: Date.now()
     };
     role = 'host';
     console.log(`[WS] New session ${session.id} created (host: ${clientIp})`);
-  } else {
+  } else if (role === 'guest') {
     session.guest = ws;
     console.log(`[WS] Guest joined session ${session.id} (${clientIp})`);
+  } else if (role === 'spectator') {
+    // ADR-15: Add as spectator
+    session.spectators.push(ws);
+    console.log(`[WS] Spectator joined session ${session.id} (${clientIp})`);
   }
 
   sessions.set(ws, session);
@@ -123,6 +140,23 @@ wss.on('connection', (ws, req) => {
       type: 'guest_connected',
       sessionId: session.id
     }));
+  }
+  // ADR-15: Notify host and guest that a spectator connected
+  if (role === 'spectator') {
+    if (session.host.readyState === WebSocket.OPEN) {
+      session.host.send(JSON.stringify({
+        type: 'spectator_connected',
+        sessionId: session.id
+      }));
+    }
+    if (session.guest && session.guest.readyState === WebSocket.OPEN) {
+      session.guest.send(JSON.stringify({
+        type: 'spectator_connected',
+        sessionId: session.id
+      }));
+    }
+    // Send current game state to the spectator immediately
+    // (host will continue broadcasting state; spectator just needs to start receiving)
   }
 
   // Handle messages
@@ -156,6 +190,10 @@ function handleMessage(ws, session, msg) {
       if (ws === session.host && session.guest && session.guest.readyState === WebSocket.OPEN) {
         session.guest.send(JSON.stringify(msg));
       }
+      // ADR-15: Also relay to spectators
+      if (ws === session.host) {
+        relayToSpectators(session, msg);
+      }
       break;
 
     case 'player_input':
@@ -168,6 +206,7 @@ function handleMessage(ws, session, msg) {
         // Host's own input — apply locally (no forwarding needed)
         // The host applies its own input directly in its simulation
       }
+      // ADR-15: Spectator input is silently ignored (read-only)
       break;
 
     case 'chat':
@@ -184,6 +223,18 @@ function handleMessage(ws, session, msg) {
   }
 }
 
+/** ADR-15: Send a message to all connected spectators */
+function relayToSpectators(session, msg) {
+  const data = JSON.stringify(msg);
+  if (session.spectators) {
+    for (const specWs of session.spectators) {
+      if (specWs.readyState === WebSocket.OPEN) {
+        specWs.send(data);
+      }
+    }
+  }
+}
+
 /**
  * Broadcast a message to all connected clients in a session except the sender
  */
@@ -195,6 +246,14 @@ function broadcast(session, msg, excludeWs) {
   if (session.guest && session.guest !== excludeWs && session.guest.readyState === WebSocket.OPEN) {
     session.guest.send(data);
   }
+  // ADR-15: Include spectators in broadcast
+  if (session.spectators) {
+    for (const specWs of session.spectators) {
+      if (specWs !== excludeWs && specWs.readyState === WebSocket.OPEN) {
+        specWs.send(data);
+      }
+    }
+  }
 }
 
 /**
@@ -205,15 +264,28 @@ function handleDisconnect(ws, session) {
   sessions.delete(ws);
 
   if (ws === session.host) {
-    // Host disconnected — notify guest and close session
+    // Host disconnected — notify guest and spectators, close session
     if (session.guest && session.guest.readyState === WebSocket.OPEN) {
       session.guest.send(JSON.stringify({
         type: 'host_disconnected',
         sessionId: session.id
       }));
       session.guest.close(1000, 'Host disconnected');
+      sessions.delete(session.guest);
     }
-    sessions.delete(session.guest);
+    // ADR-15: Close spectators
+    if (session.spectators) {
+      for (const specWs of session.spectators) {
+        if (specWs.readyState === WebSocket.OPEN) {
+          specWs.send(JSON.stringify({
+            type: 'host_disconnected',
+            sessionId: session.id
+          }));
+          specWs.close(1000, 'Host disconnected');
+        }
+        sessions.delete(specWs);
+      }
+    }
     console.log(`[WS] Session ${session.id} ended (host disconnected)`);
   } else if (ws === session.guest) {
     // Guest disconnected
@@ -224,7 +296,36 @@ function handleDisconnect(ws, session) {
         sessionId: session.id
       }));
     }
+    // ADR-15: Notify spectators
+    if (session.spectators) {
+      for (const specWs of session.spectators) {
+        if (specWs.readyState === WebSocket.OPEN) {
+          specWs.send(JSON.stringify({
+            type: 'guest_disconnected',
+            sessionId: session.id
+          }));
+        }
+      }
+    }
     console.log(`[WS] Guest left session ${session.id} (session remains open for new guest)`);
+  } else {
+    // ADR-15: Spectator disconnected
+    if (session.spectators) {
+      session.spectators = session.spectators.filter(s => s !== ws);
+    }
+    if (session.host && session.host.readyState === WebSocket.OPEN) {
+      session.host.send(JSON.stringify({
+        type: 'spectator_disconnected',
+        sessionId: session.id
+      }));
+    }
+    if (session.guest && session.guest.readyState === WebSocket.OPEN) {
+      session.guest.send(JSON.stringify({
+        type: 'spectator_disconnected',
+        sessionId: session.id
+      }));
+    }
+    console.log(`[WS] Spectator left session ${session.id}`);
   }
 }
 

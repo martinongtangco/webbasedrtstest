@@ -614,6 +614,32 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════ */
+/* ADR-15: Spectating Banner                              */
+/* ═══════════════════════════════════════════════════════ */
+
+.spectating-banner {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 24px;
+  background: rgba(255, 170, 0, 0.15);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  border-radius: 4px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: #ffaa00;
+  text-shadow: 0 0 10px rgba(255, 170, 0, 0.3);
+  animation: spectate-pulse 2s ease-in-out infinite;
+}
+
+@keyframes spectate-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════════ */
 /* ADR-14: Map Selector                                   */
 /* ═══════════════════════════════════════════════════════ */
 
