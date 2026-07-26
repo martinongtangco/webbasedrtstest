@@ -244,11 +244,6 @@ export class Unit {
       // ADR-8: Compute facing direction from path
       const distPerStep = this.speed * dt;
       const totalPathDist = this.path.length - 1;
-      const prevProgress = this.pathProgress;
-      this.pathProgress += distPerStep / (totalPathDist * tileSize);
-      // Follow path
-      const distPerStep = this.speed * dt;
-      const totalPathDist = this.path.length - 1;
       this.pathProgress += distPerStep / (totalPathDist * tileSize);
 
       if (this.pathProgress >= 1) {
