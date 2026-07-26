@@ -19,6 +19,14 @@ export class Building {
     this.sightRange = 80;
     this.diamonds = 0;        // resource held (for command center drop-off)
 
+    // ADR-5: Auto-defense stats (only command_center and siege_factory have values)
+    this.damage = 0;
+    this.attackRange = 0;
+    this.attackCooldown = 0;
+    this.attackTimer = 0;
+    this.autoAttackTimer = 0;
+    this.autoAttackInterval = 0.5;
+
     // Production
     this.productionQueue = [];
     this.productionTimer = 0;
@@ -29,6 +37,8 @@ export class Building {
     this.selectionRing = null;
     this.healthBar = null;
     this.healthBarBg = null;
+    this.muzzleFlashMesh = null;
+    this.muzzleFlashTimer = 0;
     this.constructionProgress = 1.0; // 0..1, 1 = complete
   }
 
@@ -85,6 +95,14 @@ export class Building {
     this.healthBar.position.z = 0.01;
     group.add(this.healthBar);
 
+    // ADR-5: Muzzle flash for buildings with auto-defense
+    const flashGeo = new THREE.SphereGeometry(0.5, 6, 6);
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0 });
+    this.muzzleFlashMesh = new THREE.Mesh(flashGeo, flashMat);
+    this.muzzleFlashMesh.position.y = 3;
+    this.muzzleFlashMesh.visible = false;
+    group.add(this.muzzleFlashMesh);
+
     return group;
   }
 
@@ -92,6 +110,10 @@ export class Building {
     this.maxHp = def.hp || 500;
     this.hp = this.maxHp;
     this.sightRange = def.sight || 80;
+    // ADR-5: Auto-defense stats (only set if the faction defines them)
+    this.damage = def.damage || 0;
+    this.attackRange = def.range || 0;
+    this.attackCooldown = def.cooldown || 0;
   }
 
   takeDamage(amount) {
@@ -143,6 +165,58 @@ export class Building {
     const half = this.type === 'command_center' ? 4 : 3;
     return px >= this.x - half - radius && px <= this.x + half + radius &&
            pz >= this.z - half - radius && pz <= this.z + half + radius;
+  }
+
+  /**
+   * ADR-5: Update auto-defense combat — fire at nearest enemy unit in range.
+   * Only buildings with damage > 0 and range > 0 can attack.
+   */
+  updateCombat(dt, allUnits) {
+    if (this.damage <= 0 || this.attackRange <= 0) return;
+
+    this.attackTimer -= dt;
+    this.autoAttackTimer -= dt;
+    this.muzzleFlashTimer -= dt;
+
+    // Muzzle flash visual
+    if (this.muzzleFlashMesh) {
+      if (this.muzzleFlashTimer > 0) {
+        this.muzzleFlashMesh.visible = true;
+        this.muzzleFlashMesh.material.opacity = this.muzzleFlashTimer / 0.2;
+      } else {
+        this.muzzleFlashMesh.visible = false;
+      }
+    }
+
+    // Find nearest enemy unit (auto-acquire)
+    let nearest = null;
+    let nearestDist = this.attackRange;
+
+    for (const other of allUnits) {
+      if (!other.alive || other.team === this.team) continue;
+      const dx = other.x - this.x;
+      const dz = other.z - this.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = other;
+      }
+    }
+
+    if (nearest && nearestDist <= this.attackRange) {
+      // In range — fire if cooldown expired
+      if (this.attackTimer <= 0) {
+        nearest.takeDamage(this.damage);
+        this.attackTimer = this.attackCooldown;
+        this.muzzleFlashTimer = 0.2;
+
+        // ADR-5: Face the target (rotate the muzzle flash toward enemy)
+        if (this.muzzleFlashMesh) {
+          this.muzzleFlashMesh.position.x = (dx / nearestDist) * 2;
+          this.muzzleFlashMesh.position.z = (dz / nearestDist) * 2;
+        }
+      }
+    }
   }
 }
 

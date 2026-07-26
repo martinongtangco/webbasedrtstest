@@ -1,5 +1,10 @@
 /**
- * Skirmish AI — simple finite-state AI opponent.
+ * Skirmish AI — adaptive finite-state AI opponent.
+ * 
+ * ADR-4 improvements:
+ * - Defensive positioning: idle units guard nearby buildings
+ * - Multi-pronged attacks: split combat units into 2-3 groups
+ * - Adaptive strategy: responds to player aggression, adjusts build priorities
  */
 
 export class SkirmishAI {
@@ -18,14 +23,34 @@ export class SkirmishAI {
     this.hasSiegeFactory = false;
     this.attackTimer = 30;
     this.attackInterval = 25;
+
+    // ADR-4: Adaptive tracking
+    this.initialBuildingCount = 1; // starts with 1 CC
+    this.playerAttackTimer = 0;
+    this.playerAttackInterval = 2; // scan every 2s for incoming threats
+    this.underAttack = false;
+    this.guardAssignments = new Map(); // unitId -> buildingId
+    this.buildingLosses = 0;
+    this.previousBuildingCount = 1;
   }
 
   update(dt, game) {
     this.stateTimer += dt;
     this.attackTimer -= dt;
+    this.playerAttackTimer -= dt;
 
     if (this.hasGasMining) this.biogas += dt * 2;
     this.diamonds += dt * 1;
+
+    // ADR-4: Track building losses for adaptive strategy
+    const currentBuildingCount = this.buildings.filter(b => b.team === this.team && b.alive).length;
+    if (currentBuildingCount < this.previousBuildingCount) {
+      this.buildingLosses += this.previousBuildingCount - currentBuildingCount;
+    }
+    this.previousBuildingCount = currentBuildingCount;
+
+    // ADR-4: Detect if under attack (player units near our buildings)
+    this._detectPlayerThreat(game);
 
     this._assignHarvesters();
 
@@ -39,17 +64,27 @@ export class SkirmishAI {
       this._launchAttack(game);
     }
 
+    // ADR-4: Defensive guard assignment + idle management
+    this._assignBuildingGuards(game);
     this._manageIdleUnits(game);
   }
 
   _executeBuildOrder(game) {
+    // ADR-4: Adaptive build priorities
+    // When under attack or losing buildings, prioritize barracks over gas/siege
+    const defensivePriority = this.underAttack || this.buildingLosses > 0;
+
     if (!this.hasBarracks && this.diamonds >= 100) {
       this._tryBuildBuilding('barracks', game);
       if (this.hasBarracks) this.diamonds -= 100;
+    } else if (defensivePriority && this.hasBarracks && !this.hasSiegeFactory && this.diamonds >= 150 && this.biogas >= 20) {
+      // ADR-4: When under pressure, build siege factory earlier for defense
+      this._tryBuildBuilding('siege_factory', game);
+      if (this.hasSiegeFactory) { this.diamonds -= 150; this.biogas -= 20; }
     } else if (this.hasBarracks && !this.hasGasMining && this.diamonds >= 80) {
       this._tryBuildGasMining(game);
       if (this.hasGasMining) this.diamonds -= 80;
-    } else if (this.hasBarracks && this.hasGasMining && !this.hasSiegeFactory && this.diamonds >= 150 && this.biogas >= 20) {
+    } else if (!defensivePriority && this.hasBarracks && this.hasGasMining && !this.hasSiegeFactory && this.diamonds >= 150 && this.biogas >= 20) {
       this._tryBuildBuilding('siege_factory', game);
       if (this.hasSiegeFactory) { this.diamonds -= 150; this.biogas -= 20; }
     }
@@ -100,11 +135,23 @@ export class SkirmishAI {
     const siege = this.buildings.find(b => b.team === this.team && b.type === 'siege_factory' && b.alive);
     const cc = this.buildings.find(b => b.team === this.team && b.type === 'command_center' && b.alive);
     const activeHarvesters = this.units.filter(u => u.team === this.team && u.type === 'harvester' && u.alive).length;
-    if (activeHarvesters < 4 && cc && this.diamonds >= 50) {
+
+    // ADR-4: Produce more harvesters if under attack (need resources for defense)
+    const targetHarvesters = this.underAttack ? 5 : 4;
+    if (activeHarvesters < targetHarvesters && cc && this.diamonds >= 50) {
       if (cc.queueProduction('harvester')) this.diamonds -= 50;
     }
     if (barracks && this.diamonds >= 60) {
-      const unitType = Math.random() < 0.6 ? 'trooper' : 'scout';
+      // ADR-4: Adaptive unit mix — more troopers when defending, more scouts for harassment
+      let unitType;
+      if (this.underAttack) {
+        unitType = 'trooper'; // focus on solid melee units for defense
+      } else if (this.buildingLosses > 1) {
+        // ADR-4: If losing ground, produce support units to sustain forces
+        unitType = Math.random() < 0.4 ? 'support' : 'trooper';
+      } else {
+        unitType = Math.random() < 0.6 ? 'trooper' : 'scout';
+      }
       if (barracks.queueProduction(unitType)) this.diamonds -= 60;
     }
     if (siege && this.hasGasMining && this.diamonds >= 150 && this.biogas >= 30) {
@@ -129,26 +176,159 @@ export class SkirmishAI {
   }
 
   _launchAttack(game) {
+    // ADR-4: Multi-pronged attack — split forces into 2-3 groups targeting different buildings
     const combatUnits = this.units.filter(u => u.team === this.team && u.type !== 'harvester' && u.alive && (u.state === 'idle' || u.state === 'moving'));
     if (combatUnits.length < 3) return;
     const playerBuildings = (game.buildings || []).filter(b => b.team === 0 && b.alive);
     if (playerBuildings.length === 0) return;
-    const target = playerBuildings.find(b => b.type === 'command_center') || playerBuildings[0];
-    const attackX = target.x + (Math.random() - 0.5) * 20;
-    const attackZ = target.z + (Math.random() - 0.5) * 20;
-    for (const unit of combatUnits) {
-      unit.moveTo(attackX, attackZ, game.pathGrid, this.tileSize, this.worldHalfSize);
+
+    // ADR-4: Determine number of prongs based on available units
+    const numProngs = Math.min(3, Math.max(2, playerBuildings.length));
+    const minGroupSize = 3;
+    const availableForAttack = combatUnits.length;
+
+    if (availableForAttack < numProngs * minGroupSize) {
+      // Not enough for multi-prong, fall back to concentrated attack on CC
+      const target = playerBuildings.find(b => b.type === 'command_center') || playerBuildings[0];
+      const attackX = target.x + (Math.random() - 0.5) * 20;
+      const attackZ = target.z + (Math.random() - 0.5) * 20;
+      for (const unit of combatUnits) {
+        unit.moveTo(attackX, attackZ, game.pathGrid, this.tileSize, this.worldHalfSize);
+      }
+      return;
+    }
+
+    // ADR-4: Pick distinct targets (prefer high-value: CC > siege > barracks > gas)
+    const priority = { command_center: 4, siege_factory: 3, barracks: 2, gas_mining: 1 };
+    const sortedTargets = [...playerBuildings].sort((a, b) => (priority[b.type] || 0) - (priority[a.type] || 0));
+    const targets = sortedTargets.slice(0, numProngs);
+
+    // Shuffle units for diversity
+    const shuffled = [...combatUnits].sort(() => Math.random() - 0.5);
+    const groupSize = Math.floor(shuffled.length / numProngs);
+
+    for (let i = 0; i < numProngs; i++) {
+      const target = targets[i];
+      const group = shuffled.slice(i * groupSize, (i + 1) * groupSize);
+      // Each group attacks a slightly different point near the target
+      const attackX = target.x + (Math.random() - 0.5) * 16;
+      const attackZ = target.z + (Math.random() - 0.5) * 16;
+      for (const unit of group) {
+        unit.moveTo(attackX, attackZ, game.pathGrid, this.tileSize, this.worldHalfSize);
+      }
+    }
+    // Assign remainder to highest-priority target
+    const remainder = shuffled.slice(numProngs * groupSize);
+    if (remainder.length > 0 && targets[0]) {
+      const t = targets[0];
+      for (const unit of remainder) {
+        unit.moveTo(t.x + (Math.random() - 0.5) * 16, t.z + (Math.random() - 0.5) * 16, game.pathGrid, this.tileSize, this.worldHalfSize);
+      }
     }
   }
 
-  _manageIdleUnits(game) {
-    const idleCombat = this.units.filter(u => u.team === this.team && u.type !== 'harvester' && u.alive && u.state === 'idle');
-    const playerBuildings = (game.buildings || []).filter(b => b.team === 0 && b.alive);
-    if (idleCombat.length > 0 && playerBuildings.length > 0) {
-      const target = playerBuildings[Math.floor(Math.random() * playerBuildings.length)];
-      for (const unit of idleCombat) {
-        unit.moveTo(target.x + (Math.random() - 0.5) * 30, target.z + (Math.random() - 0.5) * 30, game.pathGrid, this.tileSize, this.worldHalfSize);
+  /**
+   * ADR-4: Detect if player units are approaching our buildings (under attack)
+   */
+  _detectPlayerThreat(game) {
+    if (this.playerAttackTimer > 0) return;
+    this.playerAttackTimer = this.playerAttackInterval;
+
+    const myBuildings = this.buildings.filter(b => b.team === this.team && b.alive);
+    const playerUnits = this.units.filter(u => u.team === 0 && u.alive && u.type !== 'harvester');
+
+    let threatDetected = false;
+    for (const pUnit of playerUnits) {
+      for (const b of myBuildings) {
+        const dist = Math.sqrt((pUnit.x - b.x) ** 2 + (pUnit.z - b.z) ** 2);
+        if (dist < 60) { // Player unit within 60 units of our building
+          threatDetected = true;
+          break;
+        }
       }
+      if (threatDetected) break;
+    }
+    this.underAttack = threatDetected;
+  }
+
+  /**
+   * ADR-4: Assign idle combat units to guard nearby buildings
+   */
+  _assignBuildingGuards(game) {
+    const myBuildings = this.buildings.filter(b => b.team === this.team && b.alive);
+    if (myBuildings.length === 0) return;
+
+    // Find units that are idle and not assigned as guards
+    const idleCombat = this.units.filter(u =>
+      u.team === this.team && u.type !== 'harvester' && u.alive &&
+      u.state === 'idle' && !this.guardAssignments.has(u.id)
+    );
+
+    // ADR-4: When under attack, assign more guards (up to 3 per important building)
+    const guardsPerBuilding = this.underAttack ? 3 : 1;
+
+    // Prioritize buildings: CC > siege > barracks > gas
+    const priority = { command_center: 4, siege_factory: 3, barracks: 2, gas_mining: 1 };
+    const sortedBuildings = [...myBuildings].sort((a, b) => (priority[b.type] || 0) - (priority[a.type] || 0));
+
+    for (const unit of idleCombat) {
+      // Find nearest building that needs a guard
+      let nearestBuilding = null;
+      let nearestDist = Infinity;
+      for (const b of sortedBuildings) {
+        const currentGuards = [...this.guardAssignments.entries()]
+          .filter(([_, bid]) => bid === b.id).length;
+        if (currentGuards >= guardsPerBuilding) continue;
+
+        const dist = Math.sqrt((unit.x - b.x) ** 2 + (unit.z - b.z) ** 2);
+        if (dist < nearestDist && dist < 80) {
+          nearestDist = dist;
+          nearestBuilding = b;
+        }
+      }
+      if (nearestBuilding) {
+        // Move to a guard position near the building
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 8 + Math.random() * 6;
+        this.guardAssignments.set(unit.id, nearestBuilding.id);
+        unit.moveTo(
+          nearestBuilding.x + Math.cos(angle) * radius,
+          nearestBuilding.z + Math.sin(angle) * radius,
+          game.pathGrid, this.tileSize, this.worldHalfSize
+        );
+      }
+    }
+
+    // Clear stale guard assignments (building destroyed or unit moved to attacking)
+    for (const [unitId, buildingId] of this.guardAssignments) {
+      const unit = this.units.find(u => u.id === unitId);
+      const building = this.buildings.find(b => b.id === buildingId);
+      if (!unit || !unit.alive || !building || !building.alive || unit.state !== 'idle') {
+        this.guardAssignments.delete(unitId);
+      }
+    }
+  }
+
+  /**
+   * ADR-4: Manage truly idle units (not assigned as guards)
+   * Only sends units to harass if not under attack
+   */
+  _manageIdleUnits(game) {
+    // Only harass if not under attack — otherwise hold defensive positions
+    const idleCombat = this.units.filter(u =>
+      u.team === this.team && u.type !== 'harvester' && u.alive &&
+      u.state === 'idle' && !this.guardAssignments.has(u.id)
+    );
+    if (this.underAttack || idleCombat.length === 0) return;
+
+    const playerBuildings = (game.buildings || []).filter(b => b.team === 0 && b.alive);
+    if (playerBuildings.length === 0) return;
+
+    // ADR-4: Send small harassment groups instead of all idle units
+    const harassGroup = idleCombat.slice(0, Math.min(3, idleCombat.length));
+    const target = playerBuildings[Math.floor(Math.random() * playerBuildings.length)];
+    for (const unit of harassGroup) {
+      unit.moveTo(target.x + (Math.random() - 0.5) * 30, target.z + (Math.random() - 0.5) * 30, game.pathGrid, this.tileSize, this.worldHalfSize);
     }
   }
 }

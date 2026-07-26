@@ -61,6 +61,11 @@ let fogPlayer, fogEnemy;
 let net = null;         // NetworkClient instance
 let netWaiting = false; // true when waiting for guest to join (host mode)
 
+// ADR-6: Network delta snapshot tracking
+let netPreviousState = null;  // previous snapshot for delta computation
+let netBroadcastTimer = 0;    // throttle timer (send every 100ms)
+const NET_BROADCAST_INTERVAL = 0.1; // 100ms between broadcasts
+
 // Selection overlay
 let selectionCanvas, selectionCtx;
 
@@ -260,6 +265,8 @@ function startGame(mode, opts = {}) {
   selectedBuilding = null;
   ai = null;
   placementMode = null;
+  netPreviousState = null;
+  netBroadcastTimer = 0;
   if (placementMenuEl) placementMenuEl.classList.add('hidden');
   if (btnBuildToggle) btnBuildToggle.classList.remove('active');
 
@@ -372,64 +379,148 @@ function spawnInitialHarvesters() {
   }, 500);
 }
 
-/** Apply a game state received from the host (guest mode) */
+/** Apply a game state received from the host (guest mode)
+ * ADR-6: Handles both full-state snapshots and delta updates
+ */
 function applyRemoteState(state) {
-  // Rebuild units from host state
-  const remoteUnits = state.units || [];
-  const remoteBuildings = state.buildings || [];
-  const remoteResources = state.resources || [];
-
   // Update player resources
   playerDiamonds = state.playerDiamonds ?? playerDiamonds;
   playerBiogas = state.playerBiogas ?? playerBiogas;
 
-  // Sync units
-  for (const ru of remoteUnits) {
-    let u = units.find(u => u.id === ru.id);
-    if (!u) {
-      u = spawnUnit(ru.type, ru.faction, ru.x, ru.z, ru.team);
-      if (u) {
-        u.id = ru.id;
-        u.setStats(u.type === 'harvester' ? { hp: ru.hp, damage: ru.damage, speed: ru.speed } : { hp: ru.maxHp, damage: ru.damage, speed: ru.speed });
-        u.maxHp = ru.maxHp;
-        u.hp = ru.hp;
-      }
-    } else {
-      u.x = ru.x; u.z = ru.z;
-      u.hp = ru.hp; u.maxHp = ru.maxHp;
-      u.alive = ru.alive;
-      u.selected = false;
-    }
-  }
-  // Remove units no longer on server
-  for (const u of units) {
-    if (!remoteUnits.find(ru => ru.id === u.id) && u.alive) {
-      u.alive = false;
-      u.deathTimer = 0;
-    }
-  }
+  // ADR-6: Detect if this is a delta update (has newUnits/removedUnits fields)
+  const isDelta = state.newUnits !== undefined || state.removedUnits !== undefined;
 
-  // Sync buildings
-  for (const rb of remoteBuildings) {
-    let b = buildings.find(b => b.id === rb.id);
-    if (!b) {
-      b = spawnBuilding(rb.type, rb.faction, rb.x, rb.z, rb.team);
-      if (b) {
-        b.id = rb.id;
+  if (isDelta) {
+    // ── Delta update ──
+
+    // Apply new units
+    if (state.newUnits) {
+      for (const nu of state.newUnits) {
+        const u = spawnUnit(nu.type, nu.faction, nu.x, nu.z, nu.team);
+        if (u) {
+          u.id = nu.id;
+          u.maxHp = nu.maxHp;
+          u.hp = nu.hp;
+        }
+      }
+    }
+
+    // Apply changed units
+    if (state.units) {
+      for (const cu of state.units) {
+        const u = units.find(u => u.id === cu.id);
+        if (u) {
+          u.x = cu.x; u.z = cu.z;
+          u.hp = cu.hp; u.maxHp = cu.maxHp;
+          u.alive = cu.alive;
+          u.selected = false;
+        }
+      }
+    }
+
+    // Remove dead units
+    if (state.removedUnits) {
+      for (const id of state.removedUnits) {
+        const u = units.find(u => u.id === id);
+        if (u && u.alive) { u.alive = false; u.deathTimer = 0; }
+      }
+    }
+
+    // Apply new buildings
+    if (state.newBuildings) {
+      for (const nb of state.newBuildings) {
+        const b = spawnBuilding(nb.type, nb.faction, nb.x, nb.z, nb.team);
+        if (b) {
+          b.id = nb.id;
+          b.hp = nb.hp; b.maxHp = nb.maxHp;
+        }
+      }
+    }
+
+    // Apply changed buildings
+    if (state.buildings) {
+      for (const cb of state.buildings) {
+        const b = buildings.find(b => b.id === cb.id);
+        if (b) {
+          b.x = cb.x; b.z = cb.z;
+          b.hp = cb.hp; b.maxHp = cb.maxHp;
+          b.alive = cb.alive;
+        }
+      }
+    }
+
+    // Remove dead buildings
+    if (state.removedBuildings) {
+      for (const id of state.removedBuildings) {
+        const b = buildings.find(b => b.id === id);
+        if (b && b.alive) { b.alive = false; b.deathTimer = 0; }
+      }
+    }
+
+    // Apply changed resources
+    if (state.resources) {
+      for (const rr of state.resources) {
+        const r = resources.find(r => r.id === rr.id);
+        if (r) {
+          r.amount = rr.amount;
+          r.alive = rr.amount > 0;
+        }
+      }
+    }
+  } else {
+    // ── Full-state snapshot (initial or legacy) ──
+    const remoteUnits = state.units || [];
+    const remoteBuildings = state.buildings || [];
+    const remoteResources = state.resources || [];
+
+    // Sync units
+    for (const ru of remoteUnits) {
+      let u = units.find(u => u.id === ru.id);
+      if (!u) {
+        u = spawnUnit(ru.type, ru.faction, ru.x, ru.z, ru.team);
+        if (u) {
+          u.id = ru.id;
+          u.setStats(u.type === 'harvester' ? { hp: ru.hp, damage: ru.damage, speed: ru.speed } : { hp: ru.maxHp, damage: ru.damage, speed: ru.speed });
+          u.maxHp = ru.maxHp;
+          u.hp = ru.hp;
+        }
+      } else {
+        u.x = ru.x; u.z = ru.z;
+        u.hp = ru.hp; u.maxHp = ru.maxHp;
+        u.alive = ru.alive;
+        u.selected = false;
+      }
+    }
+    // Remove units no longer on server
+    for (const u of units) {
+      if (!remoteUnits.find(ru => ru.id === u.id) && u.alive) {
+        u.alive = false;
+        u.deathTimer = 0;
+      }
+    }
+
+    // Sync buildings
+    for (const rb of remoteBuildings) {
+      let b = buildings.find(b => b.id === rb.id);
+      if (!b) {
+        b = spawnBuilding(rb.type, rb.faction, rb.x, rb.z, rb.team);
+        if (b) {
+          b.id = rb.id;
+          b.hp = rb.hp; b.maxHp = rb.maxHp;
+        }
+      } else {
         b.hp = rb.hp; b.maxHp = rb.maxHp;
+        b.alive = rb.alive;
       }
-    } else {
-      b.hp = rb.hp; b.maxHp = rb.maxHp;
-      b.alive = rb.alive;
     }
-  }
 
-  // Sync resources
-  for (const rr of remoteResources) {
-    let r = resources.find(r => r.id === rr.id);
-    if (r) {
-      r.amount = rr.amount;
-      r.alive = rr.amount > 0;
+    // Sync resources
+    for (const rr of remoteResources) {
+      let r = resources.find(r => r.id === rr.id);
+      if (r) {
+        r.amount = rr.amount;
+        r.alive = rr.amount > 0;
+      }
     }
   }
 }
@@ -955,6 +1046,8 @@ function update(dt, time) {
     b.updateHealthBar();
     b.syncMesh();
     b.billboardBars(camera.camera);
+    // ADR-5: Building auto-defense — buildings with attack stats fire at nearby enemies
+    b.updateCombat(dt, units);
   }
   // ADR-3: Play explosion SFX for buildings that just died this frame
   for (const b of buildings) {
@@ -1015,18 +1108,29 @@ function update(dt, time) {
   }
 
   // ADR-2: Apply fog of war visibility to enemy units and buildings
+  // ADR-7: Keep selection rings visible through fog for selected entities
   for (const u of units) {
     if (!u.alive || u.mesh === null) continue;
     if (u.team !== 0) {
       const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
-      u.mesh.visible = fogPlayer.isVisible(g.x, g.y);
+      const visible = fogPlayer.isVisible(g.x, g.y);
+      u.mesh.visible = visible;
+      // ADR-7: Force selection ring visible even when hidden by fog
+      if (u.selectionRing && u.selected) {
+        u.selectionRing.visible = true;
+      }
     }
   }
   for (const b of buildings) {
     if (!b.alive || b.mesh === null) continue;
     if (b.team !== 0) {
       const g = worldToGrid(b.x, b.z, TILE_SIZE, WORLD_HALF);
-      b.mesh.visible = fogPlayer.isVisible(g.x, g.y);
+      const visible = fogPlayer.isVisible(g.x, g.y);
+      b.mesh.visible = visible;
+      // ADR-7: Force selection ring visible even when hidden by fog
+      if (b.selectionRing && b.selected) {
+        b.selectionRing.visible = true;
+      }
     }
   }
 
@@ -1044,25 +1148,88 @@ function update(dt, time) {
   if (playerCC.length === 0 && gameState === 'playing') endGame(false);
   else if (enemyCC.length === 0 && gameState === 'playing') endGame(gameMode !== 'guest');
 
-  // Host: broadcast game state to guest
+  // ADR-6: Host — broadcast game state to guest (throttled + delta)
   if (net && gameMode === 'host' && net.connected) {
-    net.sendGameState({
-      playerDiamonds,
-      playerBiogas,
-      units: units.map(u => ({
+    netBroadcastTimer += dt;
+    if (netBroadcastTimer >= NET_BROADCAST_INTERVAL) {
+      netBroadcastTimer = 0;
+
+      // Compact entity snapshot
+      const currentUnits = units.map(u => ({
         id: u.id, type: u.type, faction: u.faction,
         x: u.x, z: u.z, team: u.team,
         hp: u.hp, maxHp: u.maxHp, alive: u.alive
-      })),
-      buildings: buildings.map(b => ({
+      }));
+      const currentBuildings = buildings.map(b => ({
         id: b.id, type: b.type, faction: b.faction,
         x: b.x, z: b.z, team: b.team,
         hp: b.hp, maxHp: b.maxHp, alive: b.alive
-      })),
-      resources: resources.map(r => ({
+      }));
+      const currentResources = resources.map(r => ({
         id: r.id, amount: r.amount, alive: r.alive
-      }))
-    });
+      }));
+
+      if (!netPreviousState) {
+        // First broadcast: send full state
+        net.sendGameState({
+          playerDiamonds, playerBiogas,
+          units: currentUnits, buildings: currentBuildings, resources: currentResources
+        });
+      } else {
+        // ADR-6: Compute delta — only changed entities
+        const prevUnitIds = new Set(netPreviousState.units.map(e => e.id));
+        const currUnitIds = new Set(currentUnits.map(e => e.id));
+        const prevBuildingIds = new Set(netPreviousState.buildings.map(e => e.id));
+        const currBuildingIds = new Set(currentBuildings.map(e => e.id));
+
+        // Changed units (position or HP difference)
+        const changedUnits = currentUnits.filter(c => {
+          const p = netPreviousState.units.find(e => e.id === c.id);
+          return !p || p.x !== c.x || p.z !== c.z || p.hp !== c.hp || p.alive !== c.alive;
+        });
+        const newUnits = currentUnits.filter(c => !prevUnitIds.has(c.id));
+        const removedUnitIds = [...prevUnitIds].filter(id => !currUnitIds.has(id));
+
+        // Changed buildings
+        const changedBuildings = currentBuildings.filter(c => {
+          const p = netPreviousState.buildings.find(e => e.id === c.id);
+          return !p || p.x !== c.x || p.z !== c.z || p.hp !== c.hp || p.alive !== c.alive;
+        });
+        const newBuildings = currentBuildings.filter(c => !prevBuildingIds.has(c.id));
+        const removedBuildingIds = [...prevBuildingIds].filter(id => !currBuildingIds.has(id));
+
+        // Changed resources
+        const changedResources = currentResources.filter(c => {
+          const p = netPreviousState.resources.find(e => e.id === c.id);
+          return !p || p.amount !== c.amount || p.alive !== c.alive;
+        });
+
+        const hasChanges = changedUnits.length > 0 || newUnits.length > 0 || removedUnitIds.length > 0 ||
+                           changedBuildings.length > 0 || newBuildings.length > 0 || removedBuildingIds.length > 0 ||
+                           changedResources.length > 0 ||
+                           netPreviousState.playerDiamonds !== playerDiamonds ||
+                           netPreviousState.playerBiogas !== playerBiogas;
+
+        if (hasChanges) {
+          net.sendGameState({
+            playerDiamonds, playerBiogas,
+            units: changedUnits.length > 0 ? changedUnits : undefined,
+            newUnits: newUnits.length > 0 ? newUnits : undefined,
+            removedUnits: removedUnitIds.length > 0 ? removedUnitIds : undefined,
+            buildings: changedBuildings.length > 0 ? changedBuildings : undefined,
+            newBuildings: newBuildings.length > 0 ? newBuildings : undefined,
+            removedBuildings: removedBuildingIds.length > 0 ? removedBuildingIds : undefined,
+            resources: changedResources.length > 0 ? changedResources : undefined
+          });
+        }
+      }
+
+      // Store compact snapshot for next delta
+      netPreviousState = {
+        playerDiamonds, playerBiogas,
+        units: currentUnits, buildings: currentBuildings, resources: currentResources
+      };
+    }
   }
 
   // Player resources (from harvesters depositing)

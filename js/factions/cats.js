@@ -15,9 +15,9 @@ export const FACTION_CATS = {
   accentColor: 0xbf5fff,
 
   buildings: {
-    command_center: { hp: 550, sight: 85, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
+    command_center: { hp: 550, sight: 85, damage: 10, range: 35, cooldown: 1.2, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
     barracks: { hp: 380, sight: 65, cost: { diamonds: 80, biogas: 0 }, buildTime: 7 },
-    siege_factory: { hp: 450, sight: 70, cost: { diamonds: 180, biogas: 40 }, buildTime: 14 },
+    siege_factory: { hp: 450, sight: 70, damage: 25, range: 45, cooldown: 1.8, cost: { diamonds: 180, biogas: 40 }, buildTime: 14 },
     gas_mining: { hp: 230, sight: 55, cost: { diamonds: 70, biogas: 0 }, buildTime: 4 }
   },
 

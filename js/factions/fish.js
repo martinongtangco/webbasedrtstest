@@ -15,9 +15,9 @@ export const FACTION_FISH = {
   accentColor: 0x33ffdd,
 
   buildings: {
-    command_center: { hp: 700, sight: 75, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
+    command_center: { hp: 700, sight: 75, damage: 12, range: 28, cooldown: 1.8, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
     barracks: { hp: 450, sight: 55, cost: { diamonds: 120, biogas: 10 }, buildTime: 10 },
-    siege_factory: { hp: 550, sight: 60, cost: { diamonds: 160, biogas: 35 }, buildTime: 13 },
+    siege_factory: { hp: 550, sight: 60, damage: 30, range: 38, cooldown: 2.5, cost: { diamonds: 160, biogas: 35 }, buildTime: 13 },
     gas_mining: { hp: 280, sight: 45, cost: { diamonds: 90, biogas: 0 }, buildTime: 6 }
   },
 

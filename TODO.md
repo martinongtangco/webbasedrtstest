@@ -26,10 +26,7 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🟠 High Priority — Core Gameplay
 
-- [ ] **ADR-4 — Improve skirmish AI** — Add defensive behavior (idle units guard buildings), multi-pronged attacks, adaptive strategy based on player actions. `js/ai/skirmishAI.js`
-- [ ] **ADR-5 — Building auto-defense** — Buildings should attack nearby enemy units when in range (e.g., command center turret, defensive towers). `js/entities/buildings.js`, `main.js`
-- [ ] **ADR-6 — Network bandwidth optimization** — Full-state broadcast every frame is heavy. Implement delta snapshots (only send changed entities) or throttled updates. `js/network/client.js`, `main.js`
-- [ ] **ADR-7 — Unit selection ring visible through fog** — Selected enemy units beyond fog boundary should not reveal themselves. `main.js`
+*(All high-priority ADRs completed — see Done below)*
 
 ### 🟡 Medium Priority — Polish & Features
 
@@ -97,3 +94,8 @@ Completed tasks. Move here from Backlog or In Progress when finished.
 - [x] **Background music** — looping chord progression (Tone.js PolySynth)
 - [x] **Victory/defeat detection** — command center destruction
 - [x] **Test suite** — 68 tests (factions, pathfinding, placement, unit healing)
+- [x] **ADR-4 — Improve skirmish AI** — Added defensive building guards (idle units guard nearby buildings, 3/building when under attack), multi-pronged attacks (split combat units into 2-3 groups targeting different buildings by priority), adaptive strategy (detects player threats within 60 units, shifts production to troopers/support when under pressure, builds more harvesters when defending, adjusts build order priority). `js/ai/skirmishAI.js`
+- [x] **ADR-5 — Building auto-defense** — Added `damage`, `range`, `cooldown` stats to faction building definitions (command_center and siege_factory). Added `updateCombat()` to Building class with nearest-enemy auto-acquire, cooldown tracking, and muzzle flash visual. Called from main game loop. `js/entities/buildings.js`, `js/factions/dogs.js`, `js/factions/cats.js`, `js/factions/fish.js`, `js/main.js`
+- [x] **ADR-6 — Network bandwidth optimization** — Throttled broadcasts from every frame (60fps) to every 100ms (10Hz) = ~6x reduction. Implemented delta snapshots: only sends entities with changed position/HP/alive status, plus new/removed entity lists. Guest `applyRemoteState()` handles both full-state and delta formats. Skips broadcast entirely when nothing changed. `js/main.js`
+- [x] **ADR-7 — Unit selection ring visible through fog** — After fog visibility pass, selected enemy units/buildings have their `selectionRing.visible` forced to `true` independently of mesh visibility. Ring stays visible through fog, mesh body stays hidden. `js/main.js`
+- [x] **ADR-4 to ADR-7 test suite** — Added 4 new test files (59 tests): AI adaptive behavior, building combat algorithm, network delta computation + throttling, fog visibility + selection ring override. Total: 127 tests. `tests/test_adr4_ai.js`, `tests/test_adr5_building_defense.js`, `tests/test_adr6_network_delta.js`, `tests/test_adr7_fog_selection.js`
