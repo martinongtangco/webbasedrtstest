@@ -1788,7 +1788,7 @@ function update(dt, time) {
       u.updateAutoAttack(dt, units);
       u.updateGathering(dt, TILE_SIZE, WORLD_HALF);
       u.updateHealthBar();
-      u.syncMesh();
+      u.syncMesh(clockTime);
       u.billboardBars(camera.camera);
     }
 
@@ -1829,7 +1829,7 @@ function update(dt, time) {
         continue;
       }
       u.updateHealthBar();
-      u.syncMesh();
+      u.syncMesh(clockTime);
       u.billboardBars(camera.camera);
     }
     for (const b of buildings) {

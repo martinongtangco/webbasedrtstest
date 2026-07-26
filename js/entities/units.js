@@ -582,7 +582,7 @@ export class Unit {
    * Sync mesh position
    * ADR-8: Applies rotation toward facing direction and vertical bobbing during movement/attack
    */
-  syncMesh() {
+  syncMesh(time = 0) {
     if (this.mesh) {
       this.mesh.position.set(this.x, 0, this.z);
       this.selectionRing.visible = this.selected;
@@ -594,10 +594,10 @@ export class Unit {
 
       // ADR-8: Vertical bobbing during movement/attack states
       if (this.state === 'moving' || this.state === 'attacking' || this.state === 'gathering' || this.state === 'returning') {
-        const bobAmount = Math.sin(clockTime + this.animOffset) * 0.15;
+        const bobAmount = Math.sin(time + this.animOffset) * 0.15;
         this.mesh.position.y = Math.max(0, bobAmount);
       } else if (this.state === 'healing') {
-        const bobAmount = Math.sin(clockTime * 0.7 + this.animOffset) * 0.08;
+        const bobAmount = Math.sin(time * 0.7 + this.animOffset) * 0.08;
         this.mesh.position.y = Math.max(0, bobAmount);
       } else {
         this.mesh.position.y = 0;
