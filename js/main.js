@@ -5,7 +5,9 @@ import { worldToGrid, gridToWorld } from './engine/pathfinding.js';
 import { FogOfWar } from './engine/fogOfWar.js';
 import { Unit, resetUnitIds } from './entities/units.js';
 import { Building, resetBuildingIds } from './entities/buildings.js';
-import { ResourceNode, generateResources, resetResourceIds } from './entities/resources.js';
+import { ResourceNode, generateResources, generateResourcesFromMap, resetResourceIds } from './entities/resources.js';
+import { getDefaultMap, getAllMaps, getMap } from './engine/maps.js';
+import { createSaveState, saveGame, loadGame, listSaves, deleteSave, downloadSave, loadFromFile, formatSaveTime } from './engine/saveSystem.js';
 import { FACTION_DOGS } from './factions/dogs.js';
 import { FACTION_CATS } from './factions/cats.js';
 import { FACTION_FISH } from './factions/fish.js';
@@ -92,6 +94,24 @@ const btnUpgrades = document.getElementById('btn-upgrades');
 const btnChat = document.getElementById('btn-chat');
 // ADR-13: Settings button
 const btnSettings = document.getElementById('btn-settings');
+// ADR-14: Map selector
+const mapSelectDropdown = document.getElementById('map-select-dropdown');
+const mapDescription = document.getElementById('map-description');
+// ADR-19: Connection quality indicator
+const connectionIndicator = document.getElementById('connection-indicator');
+const pingDot = document.querySelector('.ping-dot');
+const pingValue = document.querySelector('.ping-value');
+// ADR-20: Save/Load
+const btnSaveGame = document.getElementById('btn-save');
+const btnLoadGame = document.getElementById('btn-load');
+const saveLoadModal = document.getElementById('save-load-modal');
+const btnQuickSave = document.getElementById('btn-quick-save');
+const btnQuickLoad = document.getElementById('btn-quick-load');
+const btnDownloadSave = document.getElementById('btn-download-save');
+const btnUploadSave = document.getElementById('btn-upload-save');
+const saveFileInput = document.getElementById('save-file-input');
+const btnCloseSaveLoad = document.getElementById('btn-close-save-load');
+const saveListItems = document.getElementById('save-list-items');
 const joinPanel = document.getElementById('join-panel');
 const hostIpInput = document.getElementById('host-ip');
 const factionButtons = document.querySelectorAll('.faction-btn');
@@ -113,6 +133,10 @@ let gameSettings = {
   musicVolume: 50,
   difficulty: 'medium'
 };
+
+// ADR-14: Map selection
+let selectedMapId = 'default';
+let currentMapDef = getDefaultMap();
 
 // Load saved settings from localStorage
 function loadSettings() {
@@ -164,6 +188,7 @@ function init() {
 
   buildScene();
   setupMenuEvents();
+  setupSaveLoadEvents();
   window.addEventListener('resize', onResize);
 
   // Produce unit event
@@ -282,18 +307,66 @@ function buildScene() {
   createGround();
 }
 
+// ADR-14: Build scene with map-specific settings
+function buildSceneWithMap(mapDef) {
+  // Remove old lights
+  while (scene.children.length > 0) scene.remove(scene.children[0]);
+
+  scene.background = new THREE.Color(mapDef.skyColor || '#1a1a2e');
+  scene.fog = new THREE.Fog(mapDef.skyColor || '#1a1a2e', 550, 800);
+
+  const ambient = new THREE.AmbientLight(0x404060, 0.6);
+  scene.add(ambient);
+
+  const dirLight = new THREE.DirectionalLight(0xffeedd, 1.2);
+  dirLight.position.set(WORLD_HALF * 0.6, WORLD_HALF, WORLD_HALF * 0.4);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(2048, 2048);
+  dirLight.shadow.camera.left = -WORLD_HALF;
+  dirLight.shadow.camera.right = WORLD_HALF;
+  dirLight.shadow.camera.top = WORLD_HALF;
+  dirLight.shadow.camera.bottom = -WORLD_HALF;
+  dirLight.shadow.camera.near = 10;
+  dirLight.shadow.camera.far = WORLD_SIZE * 1.5;
+  dirLight.shadow.bias = -0.001;
+  scene.add(dirLight);
+
+  scene.add(new THREE.HemisphereLight(0x8899bb, 0x445533, 0.4));
+  createGroundForMap(mapDef);
+
+  // Re-add camera
+  camera = new IsometricCamera(scene, window.innerWidth, window.innerHeight, {
+    initialDistance: 220, pitchAngle: THREE.MathUtils.degToRad(50),
+    yawAngle: THREE.MathUtils.degToRad(-45), minZoom: 70, maxZoom: 400
+  });
+  camera.setLookTarget(new THREE.Vector3(0, 0, 0));
+  scene.add(camera.camera);
+  input = new InputManager(renderer, camera);
+}
+
 function createGround() {
+  createGroundForMap(getDefaultMap());
+}
+
+/**
+ * ADR-14: Create ground mesh with map-specific terrain and colors.
+ * @param {object} mapDef - Map definition from maps.js
+ */
+function createGroundForMap(mapDef) {
+  const [freqX, freqZ, amp1, freq2a, freq2b, amp2] = mapDef.terrainParams;
+  const terrainColor = parseInt(mapDef.terrainColor.replace('#', '0x'));
+
   const groundGeo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, 64, 64);
   groundGeo.rotateX(-Math.PI / 2);
   const posAttr = groundGeo.attributes.position;
   for (let i = 0; i < posAttr.count; i++) {
     const x = posAttr.getX(i), z = posAttr.getZ(i);
-    posAttr.setY(i, Math.sin(x * 0.02) * Math.cos(z * 0.02) * 0.5 + Math.sin(x * 0.05 + z * 0.03) * 0.3);
+    posAttr.setY(i, Math.sin(x * freqX) * Math.cos(z * freqZ) * amp1 + Math.sin(x * freq2a + z * freq2b) * amp2);
   }
   groundGeo.computeVertexNormals();
 
   const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({
-    color: 0x3a5a3a, roughness: 0.95, metalness: 0.05
+    color: terrainColor, roughness: 0.95, metalness: 0.05
   }));
   ground.receiveShadow = true;
   ground.name = 'ground';
@@ -357,6 +430,22 @@ function setupMenuEvents() {
     }
   });
 
+  // ADR-14: Map selector
+  if (mapSelectDropdown) {
+    const mapDescriptions = {
+      'default': 'Balanced layout, standard resource distribution',
+      'narrow-pass': 'Elongated terrain with a central choke point',
+      'open-plains': 'Wide open terrain, favors fast and ranged units',
+      'diamond-rush': 'Abundant central resources, encourages aggressive play',
+    };
+    mapSelectDropdown.addEventListener('change', () => {
+      selectedMapId = mapSelectDropdown.value;
+      if (mapDescription && mapDescriptions[selectedMapId]) {
+        mapDescription.textContent = mapDescriptions[selectedMapId];
+      }
+    });
+  }
+
   // ADR-13: Settings button (main menu)
   btnSettings.addEventListener('click', () => {
     if (hud) {
@@ -406,6 +495,252 @@ function applyVolumeSettings() {
   const musicVol = musicVolumeMultiplier();
   if (sfx) sfx.setVolume(sfxVol);
   if (music) music.setVolume(musicVol);
+}
+
+// ── ADR-20: Save/Load ─────────────────────────────────────────────────
+
+/** Setup save/load button event handlers */
+function setupSaveLoadEvents() {
+  // HUD Save button → open modal
+  if (btnSaveGame) {
+    btnSaveGame.addEventListener('click', () => {
+      if (gameState === 'playing') {
+        renderSaveLoadModal();
+        saveLoadModal.classList.remove('hidden');
+      }
+    });
+  }
+
+  // HUD Load button → open modal
+  if (btnLoadGame) {
+    btnLoadGame.addEventListener('click', () => {
+      if (gameState === 'playing') {
+        renderSaveLoadModal();
+        saveLoadModal.classList.remove('hidden');
+      }
+    });
+  }
+
+  // Quick Save
+  if (btnQuickSave) {
+    btnQuickSave.addEventListener('click', () => {
+      const state = createSaveState({
+        units, buildings, resources,
+        playerDiamonds, playerBiogas,
+        playerFactionKey, upgradeStates,
+        mapId: selectedMapId, gameMode
+      });
+      const ok = saveGame(state);
+      if (ok) {
+        hud.addChatMessage('System', 'Game saved (Quick Save)');
+        sfx.play('build');
+        saveLoadModal.classList.add('hidden');
+      } else {
+        hud.addChatMessage('System', 'Save failed (storage full?)');
+      }
+      renderSaveLoadModal();
+    });
+  }
+
+  // Quick Load
+  if (btnQuickLoad) {
+    btnQuickLoad.addEventListener('click', () => {
+      const state = loadGame();
+      if (state) {
+        applySaveState(state);
+        hud.addChatMessage('System', 'Game loaded (Quick Save)');
+        sfx.play('build');
+        saveLoadModal.classList.add('hidden');
+      } else {
+        hud.addChatMessage('System', 'No quick save found');
+      }
+    });
+  }
+
+  // Download Save
+  if (btnDownloadSave) {
+    btnDownloadSave.addEventListener('click', () => {
+      const state = createSaveState({
+        units, buildings, resources,
+        playerDiamonds, playerBiogas,
+        playerFactionKey, upgradeStates,
+        mapId: selectedMapId, gameMode
+      });
+      downloadSave(state);
+      hud.addChatMessage('System', 'Save file downloaded');
+    });
+  }
+
+  // Upload Save
+  if (btnUploadSave) {
+    btnUploadSave.addEventListener('click', () => {
+      saveFileInput.click();
+    });
+  }
+
+  // File input change
+  if (saveFileInput) {
+    saveFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const state = await loadFromFile(file);
+      if (state) {
+        applySaveState(state);
+        hud.addChatMessage('System', `Game loaded from ${file.name}`);
+        sfx.play('build');
+        saveLoadModal.classList.add('hidden');
+      } else {
+        hud.addChatMessage('System', 'Invalid save file');
+      }
+      saveFileInput.value = ''; // reset
+    });
+  }
+
+  // Close modal
+  if (btnCloseSaveLoad) {
+    btnCloseSaveLoad.addEventListener('click', () => {
+      saveLoadModal.classList.add('hidden');
+    });
+  }
+}
+
+/** Render the save/load modal with current saves */
+function renderSaveLoadModal() {
+  if (!saveListItems) return;
+  const saves = listSaves();
+  saveListItems.innerHTML = '';
+
+  if (saves.length === 0) {
+    saveListItems.innerHTML = '<div class="no-saves">No saved games found</div>';
+    return;
+  }
+
+  for (const save of saves) {
+    const div = document.createElement('div');
+    div.className = 'save-item';
+
+    const info = document.createElement('div');
+    info.className = 'save-item-info';
+
+    const label = document.createElement('span');
+    label.className = 'save-item-label';
+    label.textContent = save.label;
+
+    const time = document.createElement('span');
+    time.className = 'save-item-time';
+    time.textContent = formatSaveTime(save.timestamp);
+
+    info.appendChild(label);
+    info.appendChild(time);
+
+    const actions = document.createElement('div');
+    actions.className = 'save-item-actions';
+
+    // Load button
+    const loadBtn = document.createElement('button');
+    loadBtn.className = 'load-btn';
+    loadBtn.textContent = 'Load';
+    loadBtn.addEventListener('click', () => {
+      const state = loadGame(save.id);
+      if (state) {
+        applySaveState(state);
+        hud.addChatMessage('System', `Game loaded (${save.label})`);
+        sfx.play('build');
+        saveLoadModal.classList.add('hidden');
+      } else {
+        hud.addChatMessage('System', 'Failed to load save');
+      }
+    });
+
+    // Delete button
+    const delBtn = document.createElement('button');
+    delBtn.className = 'delete-btn';
+    delBtn.textContent = 'Del';
+    delBtn.addEventListener('click', () => {
+      deleteSave(save.id);
+      hud.addChatMessage('System', `${save.label} deleted`);
+      renderSaveLoadModal();
+    });
+
+    actions.appendChild(loadBtn);
+    actions.appendChild(delBtn);
+
+    div.appendChild(info);
+    div.appendChild(actions);
+    saveListItems.appendChild(div);
+  }
+}
+
+/** Apply a loaded save state to the current game */
+function applySaveState(state) {
+  if (!state || !state.entities) return;
+
+  // Restore map
+  if (state.mapId) {
+    selectedMapId = state.mapId;
+    currentMapDef = getMap(selectedMapId);
+  }
+
+  // Clear current entities
+  for (const u of units) if (u.mesh) scene.remove(u.mesh);
+  for (const b of buildings) if (b.mesh) scene.remove(b.mesh);
+  for (const r of resources) if (r.mesh) scene.remove(r.mesh);
+  units = []; buildings = []; resources = [];
+  pathGrid.blocked.clear();
+  if (pathGrid.dynamicBlocked) pathGrid.dynamicBlocked.clear();
+
+  // Restore player resources
+  if (state.player) {
+    playerDiamonds = state.player.diamonds || 300;
+    playerBiogas = state.player.biogas || 0;
+    if (state.player.faction) {
+      playerFactionKey = state.player.faction;
+      playerFaction = getFaction(playerFactionKey);
+    }
+    if (state.player.upgrades) {
+      upgradeStates = state.player.upgrades;
+    }
+  }
+
+  // Restore buildings first (they block pathfinding)
+  for (const bData of state.entities.buildings) {
+    const b = spawnBuilding(bData.type, bData.faction || playerFactionKey, bData.x, bData.z, bData.team);
+    if (b) {
+      b.id = bData.id;
+      b.hp = bData.hp;
+      b.maxHp = bData.maxHp;
+      b.productionQueue = bData.productionQueue || [];
+      b.productionTimer = bData.productionTimer || 0;
+    }
+  }
+
+  // Restore units
+  for (const uData of state.entities.units) {
+    const u = spawnUnit(uData.type, uData.faction || playerFactionKey, uData.x, uData.z, uData.team);
+    if (u) {
+      u.id = uData.id;
+      u.hp = uData.hp;
+      u.maxHp = uData.maxHp;
+    }
+  }
+
+  // Restore resources
+  for (const rData of state.entities.resources) {
+    const r = new ResourceNode(rData.type, rData.x, rData.z, rData.amount);
+    r.id = rData.id;
+    r.maxAmount = rData.maxAmount;
+    r.alive = rData.amount > 0;
+    const mesh = r.createMesh();
+    scene.add(mesh);
+    resources.push(r);
+    // Block resource tiles
+    const g = worldToGrid(rData.x, rData.z, TILE_SIZE, WORLD_HALF);
+    pathGrid.blocked.add(`${g.x},${g.y}`);
+  }
+
+  // Re-apply fog of war
+  fogPlayer = new FogOfWar(MAP_SIZE, 0);
+  fogEnemy = new FogOfWar(MAP_SIZE, 1);
 }
 
 // ── Game Start/End ─────────────────────────────────────────────────────
@@ -459,24 +794,26 @@ function startGame(mode, opts = {}) {
   fogPlayer = new FogOfWar(MAP_SIZE, 0);
   fogEnemy = new FogOfWar(MAP_SIZE, 1);
 
-  // Generate resources
-  resources = generateResources(MAP_SIZE, WORLD_HALF);
+  // ADR-14: Use map-specific resource generation and base positions
+  currentMapDef = getMap(selectedMapId);
+  resources = generateResourcesFromMap(currentMapDef, TILE_SIZE, WORLD_HALF);
   for (const r of resources) {
-    const mesh = r.createMesh();
+    const node = new ResourceNode(r.type, r.x, r.z, r.amount);
+    resources[resources.length - 1] = node; // replace plain object with ResourceNode
+    const mesh = node.createMesh();
     scene.add(mesh);
     // Block resource tiles
     const g = worldToGrid(r.x, r.z, TILE_SIZE, WORLD_HALF);
     pathGrid.blocked.add(`${g.x},${g.y}`);
   }
 
-  // Place player base (team 0) — bottom-left quadrant
-  const playerBaseX = -WORLD_HALF + 60;
-  const playerBaseZ = WORLD_HALF - 60;
+  // ADR-14: Place bases from map definition
+  const playerBaseX = currentMapDef.playerBase[0];
+  const playerBaseZ = currentMapDef.playerBase[1];
   spawnBuilding('command_center', playerFactionKey, playerBaseX, playerBaseZ, 0);
 
-  // Place enemy base (team 1) — top-right quadrant
-  const enemyBaseX = WORLD_HALF - 60;
-  const enemyBaseZ = -WORLD_HALF + 60;
+  const enemyBaseX = currentMapDef.enemyBase[0];
+  const enemyBaseZ = currentMapDef.enemyBase[1];
   spawnBuilding('command_center', playerFactionKey, enemyBaseX, enemyBaseZ, 1);
 
   // Center camera on player base
@@ -521,6 +858,10 @@ function startGame(mode, opts = {}) {
       onChat: (sender, message) => {
         hud.addChatMessage(sender, message);
       },
+      // ADR-19: Ping update callback for host
+      onPingUpdate: (pingMs, quality) => {
+        // Indicator updated in main loop via updateConnectionIndicator()
+      },
       onError: (msg) => {
         console.warn('[Net]', msg);
       }
@@ -546,6 +887,10 @@ function startGame(mode, opts = {}) {
       // ADR-11: Chat callback for guest
       onChat: (sender, message) => {
         hud.addChatMessage(sender, message);
+      },
+      // ADR-19: Ping update callback for guest
+      onPingUpdate: (pingMs, quality) => {
+        // Indicator updated in main loop via updateConnectionIndicator()
       },
       onError: (msg) => {
         console.warn('[Net]', msg);
@@ -1599,6 +1944,31 @@ function update(dt, time) {
   // ADR-12: Update upgrade panel if visible
   if (hud.upgradeVisible) {
     hud.renderUpgrades(upgradeStates, playerDiamonds, playerBiogas);
+  }
+
+  // ADR-19: Update connection indicator
+  updateConnectionIndicator();
+}
+
+/** ADR-19: Update the connection quality indicator in the HUD */
+function updateConnectionIndicator() {
+  if (!net || !connectionIndicator) return;
+  if (!net.connected) {
+    connectionIndicator.classList.add('hidden');
+    return;
+  }
+  connectionIndicator.classList.remove('hidden');
+  const ping = net.getPing();
+  const quality = net.getQuality();
+  if (ping !== null) {
+    pingValue.textContent = `${ping}ms`;
+  }
+  if (pingDot) {
+    pingDot.className = 'ping-dot';
+    if (quality) pingDot.classList.add(quality);
+  }
+  if (connectionIndicator) {
+    connectionIndicator.title = `Connection: ${quality || 'unknown'} (${ping !== null ? ping + 'ms' : 'measuring...'})`;
   }
 }
 

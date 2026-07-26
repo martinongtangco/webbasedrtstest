@@ -14,6 +14,18 @@ export const FACTION_FISH = {
   secondaryColor: 0x00ffcc,
   accentColor: 0x33ffdd,
 
+  // ADR-18: Model paths
+  models: {
+    units: {
+      harvester: null, scout: null, trooper: null,
+      support: null, cannon: null, artillery: null,
+    },
+    buildings: {
+      command_center: null, barracks: null,
+      siege_factory: null, gas_mining: null,
+    }
+  },
+
   buildings: {
     command_center: { hp: 700, sight: 75, damage: 12, range: 28, cooldown: 1.8, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
     barracks: { hp: 450, sight: 55, cost: { diamonds: 120, biogas: 10 }, buildTime: 10 },

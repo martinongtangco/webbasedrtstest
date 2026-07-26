@@ -14,6 +14,18 @@ export const FACTION_CATS = {
   secondaryColor: 0x9933ff,
   accentColor: 0xbf5fff,
 
+  // ADR-18: Model paths
+  models: {
+    units: {
+      harvester: null, scout: null, trooper: null,
+      support: null, cannon: null, artillery: null,
+    },
+    buildings: {
+      command_center: null, barracks: null,
+      siege_factory: null, gas_mining: null,
+    }
+  },
+
   buildings: {
     command_center: { hp: 550, sight: 85, damage: 10, range: 35, cooldown: 1.2, cost: { diamonds: 0, biogas: 0 }, buildTime: 0 },
     barracks: { hp: 380, sight: 65, cost: { diamonds: 80, biogas: 0 }, buildTime: 7 },

@@ -18,6 +18,17 @@
         <button id="btn-faction-cats" class="faction-btn" data-faction="cats">🐈 Feline Vanguard</button>
         <button id="btn-faction-fish" class="faction-btn" data-faction="fish">🐟 Abyssal Trident</button>
       </div>
+      <!-- ADR-14: Map selector -->
+      <div id="map-select" class="map-select">
+        <span class="map-select-label">Map:</span>
+        <select id="map-select-dropdown">
+          <option value="default">Default</option>
+          <option value="narrow-pass">Narrow Pass</option>
+          <option value="open-plains">Open Plains</option>
+          <option value="diamond-rush">Diamond Rush</option>
+        </select>
+        <span id="map-description" class="map-description">Balanced layout, standard resource distribution</span>
+      </div>
       <button id="btn-skirmish" class="menu-btn" disabled>Skirmish vs CPU</button>
       <button id="btn-host" class="menu-btn">Host LAN Game</button>
       <button id="btn-join" class="menu-btn">Join LAN Game</button>
@@ -35,9 +46,17 @@
     <div id="resource-bar">
       <span id="diamond-count">💎 0</span>
       <span id="biogas-count">⚡ 0</span>
+      <!-- ADR-19: Connection quality indicator -->
+      <span id="connection-indicator" class="connection-indicator hidden" title="Connection quality">
+        <span class="ping-dot"></span>
+        <span class="ping-value">--</span>
+      </span>
       <button id="btn-build-toggle" class="build-toggle-btn">Build</button>
       <button id="btn-upgrades" class="build-toggle-btn">Upgrades</button>
       <button id="btn-chat" class="build-toggle-btn">Chat</button>
+      <!-- ADR-20: Save/Load buttons -->
+      <button id="btn-save" class="build-toggle-btn" title="Quick save">💾 Save</button>
+      <button id="btn-load" class="build-toggle-btn" title="Quick load">📂 Load</button>
     </div>
     <div id="placement-menu" class="placement-menu hidden"></div>
     <div id="minimap-container"></div>
@@ -68,6 +87,27 @@
   <div id="game-over" class="game-over hidden">
     <h2 id="game-over-title"></h2>
     <button id="btn-menu" class="menu-btn">Return to Menu</button>
+  </div>
+
+  <!-- ADR-20: Save/Load Modal -->
+  <div id="save-load-modal" class="settings-modal hidden">
+    <div class="settings-content">
+      <h2>💾 Save / Load Game</h2>
+      <div class="save-buttons">
+        <button id="btn-quick-save" class="menu-btn small">Quick Save</button>
+        <button id="btn-quick-load" class="menu-btn small">Quick Load</button>
+        <button id="btn-download-save" class="menu-btn small">Download Save</button>
+        <button id="btn-upload-save" class="menu-btn small">Upload Save</button>
+        <input type="file" id="save-file-input" accept=".json" class="hidden">
+      </div>
+      <div id="save-list" class="save-list">
+        <h3>Saved Games</h3>
+        <div id="save-list-items"></div>
+      </div>
+      <div class="settings-buttons">
+        <button id="btn-close-save-load" class="menu-btn small">Close</button>
+      </div>
+    </div>
   </div>
 
   <!-- ADR-13: Settings Modal -->
@@ -110,6 +150,7 @@
     }
   }
   </script>
+  <!-- ADR-18: glTF model loader (lazy-loaded by modelLoader.js) -->
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

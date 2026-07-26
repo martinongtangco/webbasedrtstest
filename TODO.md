@@ -34,13 +34,9 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🟢 Low Priority — Nice-to-Have
 
-- [ ] **ADR-14 — Multiple map layouts** — Single hardcoded map. Add procedural or hand-crafted map variations. `main.js`
 - [ ] **ADR-15 — Spectator mode** — Third player joins and watches without controlling. `js/network/client.js`, `main.js`
 - [ ] **ADR-16 — Replay system** — Record game events and replay later. New module.
 - [ ] **ADR-17 — NAT traversal (WebRTC)** — Enable play across different networks, not just LAN. `server.js`, `js/network/client.js`
-- [ ] **ADR-18 — Custom 3D models (glTF)** — Replace Three.js primitives with imported models. `js/factions/`, `js/entities/`
-- [ ] **ADR-19 — Connection quality indicator** — Show ping/latency to the other player. `js/network/client.js`, `js/ui/hud.js`
-- [ ] **ADR-20 — Save/load game state** — Persist and restore games. New module.
 
 ---
 
@@ -101,3 +97,8 @@ Completed tasks. Move here from Backlog or In Progress when finished.
 - [x] **ADR-12 — Unit upgrades / tech tree** — Three upgrades: Weapon (+20% DMG, 200💎/50⚡, 15s), Engine (+15% SPD, 150💎/30⚡, 12s), Armor (+25% HP, 180💎/40⚡, 15s). Upgrade panel toggled via Upgrades button. `Unit.applyUpgrade()` modifies stats directly. On completion, all existing player units receive the upgrade. New units auto-get upgraded stats. `js/entities/units.js`, `js/ui/hud.js`, `js/main.js`, `index.html`, `style.css`
 - [x] **ADR-13 — Settings / options menu** — Settings modal with SFX volume slider (0-100%), Music volume slider (0-100%), Difficulty select (easy/medium/hard). Volume mapped to Tone.js dB: SFX 0→-30dB/1→0dB, Music 0→-30dB/1→-18dB. Settings persisted to `localStorage`. Applied to audio on change. `js/audio/sfx.js`, `js/audio/music.js`, `js/ui/hud.js`, `js/main.js`, `index.html`, `style.css`
 - [x] **ADR-8 to ADR-13 test suite** — Added `tests/test_adr8_to_13.js` (39 tests): unit animation state/bobbing/facing, particle structure/physics/fade, dynamic obstacle computation/clearing, chat message storage/limits/clearing, upgrade stats/research/affordability, settings defaults/volume mapping/persistence. Total: 166 tests. `tests/test_adr8_to_13.js`
+- [x] **ADR-14 — Multiple map layouts** — Added `js/engine/maps.js` with 4 map definitions (Default, Narrow Pass, Open Plains, Diamond Rush). Each map has terrain params, resource positions, base positions, colors. Map selector dropdown in main menu with descriptions. `generateResourcesFromMap()` in resources.js. Base positions and resources loaded from map data at game start. `js/engine/maps.js`, `js/entities/resources.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-18 — Custom 3D models (glTF)** — Added `js/engine/modelLoader.js` with `loadModel()` (GLTFLoader + Draco), `createPlaceholder()` fallback, faction model registry (`registerFactionModels`, `getModelPath`). Model paths added to faction definitions (`dogs.js`, `cats.js`, `fish.js`) as `models.units` / `models.buildings` dicts (null until .glb files provided). Infrastructure ready for glTF model integration. `js/engine/modelLoader.js`, `js/factions/dogs.js`, `js/factions/cats.js`, `js/factions/fish.js`
+- [x] **ADR-19 — Connection quality indicator** — Added ping monitoring to `NetworkClient`: periodic ping/ping_reply exchange every 2s, rolling 5-sample average. Quality levels: excellent (<50ms), good (<100ms), fair (<200ms), poor (>200ms), disconnected. HUD indicator shows colored dot + ping ms in resource bar. `js/network/client.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-20 — Save/load game state** — Added `js/engine/saveSystem.js` with `createSaveState()` (serializes alive entities, resources, upgrades, map, mode), `saveGame()`/`loadGame()` to localStorage, named slots, `downloadSave()`/`loadFromFile()` for file portability, `listSaves()`/`deleteSave()`. Save/Load buttons in HUD open modal with Quick Save/Load, Download, Upload, and save list with Load/Del actions. `applySaveState()` restores full game. `js/engine/saveSystem.js`, `js/main.js`, `index.html`, `style.css`
+- [x] **ADR-14 to ADR-20 test suite** — Added `tests/test_adr14_to_20.js` (24 tests): map definitions/fields/uniqueness/resources/base positions, model registry/paths/placeholders, ping quality thresholds/averaging/windowing, save state serialization/load/delete/list/invalid rejection. Total: 190 tests. `tests/test_adr14_to_20.js`

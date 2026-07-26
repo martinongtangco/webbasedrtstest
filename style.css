@@ -614,6 +614,205 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════ */
+/* ADR-14: Map Selector                                   */
+/* ═══════════════════════════════════════════════════════ */
+
+.map-select {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 0.5rem;
+}
+
+.map-select-label {
+  font-size: 0.85rem;
+  color: #889;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.map-select select {
+  width: 280px;
+  padding: 8px 14px;
+  font-size: 0.95rem;
+  background: #1a1a2e;
+  border: 2px solid #3a3a5a;
+  border-radius: 4px;
+  color: #e0e0e0;
+  outline: none;
+  cursor: pointer;
+}
+
+.map-select select:focus {
+  border-color: #00d4ff;
+}
+
+.map-description {
+  font-size: 0.75rem;
+  color: #667;
+  font-style: italic;
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════ */
+/* ADR-19: Connection Quality Indicator                   */
+/* ═══════════════════════════════════════════════════════ */
+
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #889;
+  padding: 0 8px;
+}
+
+.ping-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555;
+  display: inline-block;
+  transition: background 0.3s ease;
+}
+
+.ping-dot.excellent {
+  background: #00ff88;
+  box-shadow: 0 0 6px #00ff88;
+}
+
+.ping-dot.good {
+  background: #88dd44;
+  box-shadow: 0 0 6px #88dd44;
+}
+
+.ping-dot.fair {
+  background: #ffaa00;
+  box-shadow: 0 0 6px #ffaa00;
+}
+
+.ping-dot.poor {
+  background: #ff3344;
+  box-shadow: 0 0 6px #ff3344;
+  animation: ping-pulse 1s ease-in-out infinite;
+}
+
+.ping-dot.disconnected {
+  background: #555;
+  box-shadow: none;
+}
+
+.ping-value {
+  font-size: 0.8rem;
+  color: #aaa;
+}
+
+@keyframes ping-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ═══════════════════════════════════════════════════════ */
+/* ADR-20: Save/Load Modal                                */
+/* ═══════════════════════════════════════════════════════ */
+
+.save-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.save-list {
+  margin-bottom: 16px;
+}
+
+.save-list h3 {
+  font-size: 1rem;
+  color: #00d4ff;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+#save-list-items {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.save-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  background: rgba(26, 26, 46, 0.8);
+  border: 1px solid #3a3a5a;
+  border-radius: 4px;
+}
+
+.save-item-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.save-item-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #e0e0e0;
+}
+
+.save-item-time {
+  font-size: 0.7rem;
+  color: #667;
+}
+
+.save-item-faction {
+  font-size: 0.7rem;
+  color: #889;
+}
+
+.save-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.save-item-actions button {
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5a;
+  border-radius: 3px;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.save-item-actions button:hover {
+  border-color: #00d4ff;
+  color: #00d4ff;
+}
+
+.save-item-actions button.load-btn:hover {
+  border-color: #00ff88;
+  color: #00ff88;
+}
+
+.save-item-actions button.delete-btn:hover {
+  border-color: #ff3344;
+  color: #ff3344;
+}
+
+.no-saves {
+  text-align: center;
+  color: #555;
+  font-size: 0.85rem;
+  padding: 12px;
+  font-style: italic;
+}
+
+/* ═══════════════════════════════════════════════════════ */
 /* ADR-13: Settings Modal                                 */
 /* ═══════════════════════════════════════════════════════ */
 

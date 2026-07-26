@@ -14,6 +14,25 @@ export const FACTION_DOGS = {
   secondaryColor: 0xcc2233,
   accentColor: 0xff4444,
 
+  // ADR-18: Model paths (set to actual .glb files when available)
+  // When a model path is defined, it overrides the primitive mesh builder for that entity.
+  models: {
+    units: {
+      harvester: null,  // e.g. '/models/dogs/harvester.glb'
+      scout: null,
+      trooper: null,
+      support: null,
+      cannon: null,
+      artillery: null,
+    },
+    buildings: {
+      command_center: null,
+      barracks: null,
+      siege_factory: null,
+      gas_mining: null,
+    }
+  },
+
   // Building stats
   // ADR-5: command_center and siege_factory have auto-defense (damage, range, cooldown)
   buildings: {

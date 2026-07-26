@@ -25,6 +25,16 @@ export class NetworkClient {
     this.onError = opts.onError || ((msg) => console.warn('[Net]', msg));
     // ADR-11: Chat callback
     this.onChat = opts.onChat || ((sender, message) => {});
+    // ADR-19: Connection quality callback
+    this.onPingUpdate = opts.onPingUpdate || ((pingMs, quality) => {});
+
+    // ADR-19: Ping tracking
+    this._pingTimes = [];         // last N ping measurements in ms
+    this._pingInterval = 2000;    // ping every 2 seconds
+    this._pingTimer = null;
+    this._pendingPings = {};      // id → timestamp
+    this._currentPing = null;     // current ping in ms
+    this._currentQuality = 'unknown'; // 'excellent' | 'good' | 'fair' | 'poor'
 
     // Pending messages (queued until connected)
     this._queue = [];
@@ -64,6 +74,8 @@ export class NetworkClient {
         this.ws.send(JSON.stringify(msg));
       }
       this._queue = [];
+      // ADR-19: Start ping monitoring
+      this._startPingTimer();
     };
 
     this.ws.onmessage = (event) => {
@@ -77,6 +89,11 @@ export class NetworkClient {
 
     this.ws.onclose = () => {
       this.connected = false;
+      // ADR-19: Stop ping monitoring
+      this._stopPingTimer();
+      this._currentPing = null;
+      this._currentQuality = 'disconnected';
+      this.onPingUpdate(null, 'disconnected');
       this.onOpponentLeft();
     };
 
@@ -128,6 +145,31 @@ export class NetworkClient {
         this.onChat(msg.sender || 'Opponent', msg.message);
         break;
 
+      // ADR-19: Ping reply
+      case 'ping_reply':
+        if (this._pendingPings[msg.id] !== undefined) {
+          const pingMs = Date.now() - this._pendingPings[msg.id];
+          delete this._pendingPings[msg.id];
+          this._pingTimes.push(pingMs);
+          // Keep last 5 measurements
+          if (this._pingTimes.length > 5) this._pingTimes.shift();
+          // Compute average
+          const avg = Math.round(this._pingTimes.reduce((a, b) => a + b, 0) / this._pingTimes.length);
+          this._currentPing = avg;
+          // Determine quality
+          if (avg < 50) this._currentQuality = 'excellent';
+          else if (avg < 100) this._currentQuality = 'good';
+          else if (avg < 200) this._currentQuality = 'fair';
+          else this._currentQuality = 'poor';
+          this.onPingUpdate(avg, this._currentQuality);
+        }
+        break;
+
+      // ADR-19: Ping request (from other side)
+      case 'ping':
+        this.send({ type: 'ping_reply', id: msg.id });
+        break;
+
       default:
         break;
     }
@@ -171,10 +213,50 @@ export class NetworkClient {
   }
 
   disconnect() {
+    this._stopPingTimer();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
     this.connected = false;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // ADR-19: Ping monitoring
+  // ═══════════════════════════════════════════════════════════
+
+  /** Start periodic ping checks */
+  _startPingTimer() {
+    this._stopPingTimer(); // clear any existing timer
+    this._pingTimer = setInterval(() => {
+      if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+      const id = Date.now() + Math.random();
+      this._pendingPings[id] = Date.now();
+      this.send({ type: 'ping', id });
+    }, this._pingInterval);
+  }
+
+  /** Stop ping timer */
+  _stopPingTimer() {
+    if (this._pingTimer) {
+      clearInterval(this._pingTimer);
+      this._pingTimer = null;
+    }
+  }
+
+  /**
+   * Get current ping in milliseconds.
+   * @returns {number|null}
+   */
+  getPing() {
+    return this._currentPing;
+  }
+
+  /**
+   * Get current connection quality string.
+   * @returns {string} 'excellent' | 'good' | 'fair' | 'poor' | 'unknown' | 'disconnected'
+   */
+  getQuality() {
+    return this._currentQuality;
   }
 }

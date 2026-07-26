@@ -142,7 +142,7 @@ export class ResourceNode {
 }
 
 /**
- * Generate resource nodes for the map
+ * Generate resource nodes for the map (legacy — uses default layout).
  * @param {number} mapSize
  * @param {number} worldHalfSize
  * @returns {ResourceNode[]}
@@ -171,6 +171,33 @@ export function generateResources(mapSize, worldHalfSize) {
   ];
 
   for (const pos of gasPositions) {
+    const wx = pos.gx * tileSize + tileSize / 2 - worldHalfSize;
+    const wz = pos.gy * tileSize + tileSize / 2 - worldHalfSize;
+    nodes.push(new ResourceNode('gas', wx, wz, 9999)); // infinite
+  }
+
+  return nodes;
+}
+
+/**
+ * Generate resource nodes from a map definition.
+ * @param {object} mapDef - Map definition from maps.js
+ * @param {number} tileSize
+ * @param {number} worldHalfSize
+ * @returns {ResourceNode[]}
+ */
+export function generateResourcesFromMap(mapDef, tileSize, worldHalfSize) {
+  const nodes = [];
+
+  // Diamond deposits
+  for (const cluster of mapDef.diamondClusters) {
+    const wx = cluster.gx * tileSize + tileSize / 2 - worldHalfSize;
+    const wz = cluster.gy * tileSize + tileSize / 2 - worldHalfSize;
+    nodes.push(new ResourceNode('diamond', wx, wz, cluster.amount));
+  }
+
+  // Gas vents
+  for (const pos of mapDef.gasPositions) {
     const wx = pos.gx * tileSize + tileSize / 2 - worldHalfSize;
     const wz = pos.gy * tileSize + tileSize / 2 - worldHalfSize;
     nodes.push(new ResourceNode('gas', wx, wz, 9999)); // infinite
