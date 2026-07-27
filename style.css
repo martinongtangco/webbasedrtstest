@@ -735,6 +735,26 @@ body {
   color: #aaa;
 }
 
+/* ═══════════════════════════════════════════════════════ */
+/* ADR-17: Internet Game UI                               */
+/* ═══════════════════════════════════════════════════════ */
+
+.join-hint {
+  font-size: 0.75rem;
+  color: #667;
+  text-align: center;
+  max-width: 280px;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.menu-btn:has(#btn-host-internet):hover,
+#btn-host-internet:hover,
+#btn-join-internet:hover {
+  border-color: #00ff88;
+  color: #00ff88;
+}
+
 @keyframes ping-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

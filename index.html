@@ -32,6 +32,9 @@
       <button id="btn-skirmish" class="menu-btn" disabled>Skirmish vs CPU</button>
       <button id="btn-host" class="menu-btn">Host LAN Game</button>
       <button id="btn-join" class="menu-btn">Join LAN Game</button>
+      <!-- ADR-17: Internet game buttons -->
+      <button id="btn-host-internet" class="menu-btn">🌐 Host Internet Game</button>
+      <button id="btn-join-internet" class="menu-btn">🌐 Join Internet Game</button>
       <!-- ADR-15: Spectate button -->
       <button id="btn-spectate" class="menu-btn">Spectate Game</button>
       <!-- ADR-16: Replay button -->
@@ -42,6 +45,13 @@
       <label for="host-ip">Host IP Address:</label>
       <input type="text" id="host-ip" placeholder="e.g. 192.168.1.100:8181">
       <button id="btn-connect" class="menu-btn small">Connect</button>
+    </div>
+    <!-- ADR-17: Internet join panel -->
+    <div id="internet-join-panel" class="join-panel hidden">
+      <label for="server-url">Signaling Server URL:</label>
+      <input type="text" id="server-url" placeholder="e.g. play.frontieruprising.com:8181">
+      <p class="join-hint">Enter the server URL shared by your opponent. Both players must reach the same server.</p>
+      <button id="btn-internet-connect" class="menu-btn small">Connect</button>
     </div>
     <!-- ADR-15: Spectate panel -->
     <div id="spectate-panel" class="join-panel hidden">

@@ -4,6 +4,10 @@
  * Serves static client files over HTTP and relays multiplayer messages
  * over WebSocket. Run with: node server.js
  *
+ * ADR-17: Also acts as a WebRTC signaling server for NAT traversal.
+ * Players exchange SDP offers/answers and ICE candidates through this
+ * server, then communicate peer-to-peer via WebRTC data channels.
+ *
  * Dependencies: npm install ws
  */
 
@@ -13,6 +17,8 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 8181;
+// ADR-17: Public URL for remote players (set via env or auto-detect)
+const SERVER_URL = process.env.SERVER_URL || `http://localhost:${PORT}`;
 const STATIC_DIR = path.join(__dirname);
 
 // MIME types for static file serving
@@ -134,6 +140,13 @@ wss.on('connection', (ws, req) => {
     sessionId: session.id
   }));
 
+  // ADR-17: Send server URL for remote connections
+  ws.send(JSON.stringify({
+    type: 'server_info',
+    serverUrl: SERVER_URL,
+    port: PORT
+  }));
+
   // Notify host that a guest connected
   if (role === 'guest' && session.host.readyState === WebSocket.OPEN) {
     session.host.send(JSON.stringify({
@@ -216,6 +229,42 @@ function handleMessage(ws, session, msg) {
 
     case 'ack':
       // Acknowledgment — no relay needed
+      break;
+
+    // ═══════════════════════════════════════════════════════════
+    // ADR-17: WebRTC signaling messages
+    // ═══════════════════════════════════════════════════════════
+
+    case 'webrtc_offer':
+      // Host sends SDP offer to guest via relay
+      if (ws === session.host && session.guest && session.guest.readyState === WebSocket.OPEN) {
+        session.guest.send(JSON.stringify(msg));
+      }
+      break;
+
+    case 'webrtc_answer':
+      // Guest sends SDP answer back to host via relay
+      if (ws === session.guest && session.host && session.host.readyState === WebSocket.OPEN) {
+        session.host.send(JSON.stringify(msg));
+      }
+      break;
+
+    case 'webrtc_candidate':
+      // Relay ICE candidate to the other peer
+      if (ws === session.host && session.guest && session.guest.readyState === WebSocket.OPEN) {
+        session.guest.send(JSON.stringify(msg));
+      } else if (ws === session.guest && session.host && session.host.readyState === WebSocket.OPEN) {
+        session.host.send(JSON.stringify(msg));
+      }
+      break;
+
+    case 'webrtc_use_relay':
+      // A peer signals that WebRTC failed; use WebSocket relay instead
+      if (ws === session.host && session.guest && session.guest.readyState === WebSocket.OPEN) {
+        session.guest.send(JSON.stringify(msg));
+      } else if (ws === session.guest && session.host && session.host.readyState === WebSocket.OPEN) {
+        session.host.send(JSON.stringify(msg));
+      }
       break;
 
     default:
@@ -337,8 +386,11 @@ server.listen(PORT, '0.0.0.0', () => {
 ╠══════════════════════════════════════════════════════════╣
 ║  Local:   http://localhost:${PORT}                        ║
 ║  LAN:     http://<your-LAN-IP>:${PORT}                    ║
+║  Internet: Set SERVER_URL env var for remote play       ║
 ║                                                        ║
-║  Open the URL in two browsers for LAN multiplayer       ║
+║  LAN: Open the URL in two browsers                     ║
+║  Internet: Share SERVER_URL with remote opponent        ║
+║  (WebRTC NAT traversal enabled for cross-network play)  ║
 ╚══════════════════════════════════════════════════════════╝
   `);
 });

@@ -34,7 +34,7 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🟢 Low Priority — Nice-to-Have
 
-- [ ] **ADR-17 — NAT traversal (WebRTC)** — Enable play across different networks, not just LAN. `server.js`, `js/network/client.js`
+*(ADR-17 moved to In Progress)*
 
 ---
 
@@ -48,7 +48,7 @@ Tasks currently being worked on. *(empty)*
 
 Tasks that depend on other work being completed first.
 
-- [ ] **ADR-17 — NAT traversal** — Blocked on: core LAN multiplayer needs to be rock-solid first
+*(ADR-17 moved to In Progress)*
 
 ---
 
@@ -56,6 +56,7 @@ Tasks that depend on other work being completed first.
 
 Completed tasks. Move here from Backlog or In Progress when finished.
 
+- [x] **ADR-17 — NAT traversal (WebRTC)** — Server acts as WebRTC signaling server. Players exchange SDP offers/answers and ICE candidates through the relay server, then communicate peer-to-peer via WebRTC data channels. STUN servers (Google, Cloudflare) + TURN (OpenRelay) for NAT traversal. Falls back to WebSocket relay if WebRTC fails. Internet Host/Join game modes in UI. `server.js`, `js/network/webrtc.js`, `js/network/client.js`, `js/main.js`, `index.html`, `style.css`, `tests/test_adr17_webrtc.js`
 - [x] **ADR-16 — Replay system** — Event recording + periodic checkpoint replay. Records player inputs (select, box-select, command, build, upgrade) and AI events (spawn unit/building, commands) with tick timestamps. Periodic snapshots every 30s for drift correction. Replay playback with pause/resume, speed control (0.5x, 1x, 2x, 4x), rewind, progress bar. Replay library modal with list, watch, download, upload, delete. Replays saved to localStorage as JSON, exportable/importable as files. Seeded PRNG (mulberry32) for deterministic replay. 108 tests. `js/engine/replay.js`, `js/main.js`, `index.html`, `style.css`, `tests/test_adr16_replay.js`
 - [x] **ADR-1 — Guest input integrated into host simulation** — Added `onPlayerInput` callback to NetworkClient host config; host now calls `processSelection`/`processBoxSelection`/`processCommand` for guest inputs. Refactored `handleInput()` into reusable functions. `js/network/client.js`, `js/main.js`
 - [x] **ADR-2 — Fog of war visually applied** — Enemy units/buildings now have `mesh.visible` toggled based on `fogPlayer.isVisible()` at their grid position after fog tick+reveal. `js/main.js`

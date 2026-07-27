@@ -110,6 +110,12 @@ const mapDescription = document.getElementById('map-description');
 const connectionIndicator = document.getElementById('connection-indicator');
 const pingDot = document.querySelector('.ping-dot');
 const pingValue = document.querySelector('.ping-value');
+// ADR-17: Internet game UI
+const btnHostInternet = document.getElementById('btn-host-internet');
+const btnJoinInternet = document.getElementById('btn-join-internet');
+const internetJoinPanel = document.getElementById('internet-join-panel');
+const serverUrlInput = document.getElementById('server-url');
+const btnInternetConnect = document.getElementById('btn-internet-connect');
 // ADR-20: Save/Load
 const btnSaveGame = document.getElementById('btn-save');
 const btnLoadGame = document.getElementById('btn-load');
@@ -541,6 +547,48 @@ function setupMenuEvents() {
       renderReplayList();
       replayModal.classList.remove('hidden');
     });
+  }
+
+  // ADR-17: Internet game buttons
+  if (btnHostInternet) {
+    btnHostInternet.addEventListener('click', () => {
+      if (NetworkClient.isWebrtcSupported()) {
+        startGame('internet-host');
+      } else {
+        alert('WebRTC is not supported in your browser.\nPlease use a modern browser (Chrome, Firefox, Edge).');
+      }
+    });
+  }
+
+  if (btnJoinInternet) {
+    btnJoinInternet.addEventListener('click', () => {
+      internetJoinPanel.classList.toggle('hidden');
+    });
+  }
+
+  if (btnInternetConnect) {
+    btnInternetConnect.addEventListener('click', () => {
+      const serverUrl = serverUrlInput.value.trim();
+      if (serverUrl) {
+        if (NetworkClient.isWebrtcSupported()) {
+          startGame('internet-guest', { serverUrl });
+        } else {
+          alert('WebRTC is not supported in your browser.\nPlease use a modern browser (Chrome, Firefox, Edge).');
+        }
+      }
+    });
+  }
+
+  // ADR-17: Check WebRTC support on load, disable buttons if not supported
+  if (!NetworkClient.isWebrtcSupported()) {
+    if (btnHostInternet) {
+      btnHostInternet.disabled = true;
+      btnHostInternet.title = 'WebRTC not supported in this browser';
+    }
+    if (btnJoinInternet) {
+      btnJoinInternet.disabled = true;
+      btnJoinInternet.title = 'WebRTC not supported in this browser';
+    }
   }
 }
 
@@ -1177,7 +1225,7 @@ function startGame(mode, opts = {}) {
   // ADR-16: Reset replay state
   replayRecorder = new ReplayRecorder();
   replayTick = 0;
-  replayRecording = (mode === 'skirmish' || mode === 'host');
+  replayRecording = (mode === 'skirmish' || mode === 'host' || mode === 'internet-host');
   replaySnapshotTimer = 0;
   replayReplayer = null;
   replayControls.classList.add('hidden');
@@ -1330,6 +1378,80 @@ function startGame(mode, opts = {}) {
       }
     });
     net.connectGuest(opts.hostIp || 'localhost:8181');
+  }
+  // ADR-17: Internet host mode (WebRTC with signaling server)
+  else if (mode === 'internet-host') {
+    gameState = 'waiting';
+    netWaiting = true;
+    waitingOverlay.classList.remove('hidden');
+    hostIpDisplay.textContent = `Share this URL with your opponent:\n${location.origin}`;
+    // Host gets AI for enemy team
+    ai = new SkirmishAI({
+      units, buildings, resources, tileSize: TILE_SIZE, worldHalfSize: WORLD_HALF, fog: fogEnemy
+    });
+    net = new NetworkClient('internet-host', {
+      onGuestConnected: () => {
+        netWaiting = false;
+        gameState = 'playing';
+        waitingOverlay.classList.add('hidden');
+        spawnInitialHarvesters();
+      },
+      onOpponentLeft: () => {
+        endGame(false);
+      },
+      onPlayerInput: (data) => {
+        if (data.action === 'select') processSelection(data.x, data.z);
+        else if (data.action === 'box_select') processBoxSelection(data.minX, data.minZ, data.maxX, data.maxZ);
+        else if (data.action === 'command') processCommand(data.x, data.z);
+      },
+      onChat: (sender, message) => { hud.addChatMessage(sender, message); },
+      onPingUpdate: () => {},
+      // ADR-17: WebRTC callbacks
+      onWebrtcConnected: () => {
+        hud.addChatMessage('System', '🌐 Connected via WebRTC (peer-to-peer)');
+      },
+      onWebrtcFailed: () => {
+        hud.addChatMessage('System', '⚠️ WebRTC failed, using relay (higher latency)');
+      },
+      onError: (msg) => { console.warn('[Net]', msg); }
+    });
+    net.connectInternetHost();
+  }
+  // ADR-17: Internet guest mode (WebRTC with signaling server)
+  else if (mode === 'internet-guest') {
+    gameState = 'waiting';
+    netWaiting = true;
+    waitingOverlay.classList.remove('hidden');
+    hostIpDisplay.textContent = `Connecting to ${opts.serverUrl}...`;
+    net = new NetworkClient('internet-guest', {
+      onOpponentLeft: () => {
+        if (gameState === 'playing') endGame(false);
+      },
+      onGameState: (state) => {
+        if (gameState === 'waiting') {
+          gameState = 'playing';
+          netWaiting = false;
+          waitingOverlay.classList.add('hidden');
+        }
+        applyRemoteState(state);
+      },
+      onChat: (sender, message) => { hud.addChatMessage(sender, message); },
+      onPingUpdate: () => {},
+      // ADR-17: WebRTC callbacks
+      onWebrtcConnected: () => {
+        hud.addChatMessage('System', '🌐 Connected via WebRTC (peer-to-peer)');
+      },
+      onWebrtcFailed: () => {
+        hud.addChatMessage('System', '⚠️ WebRTC failed, using relay (higher latency)');
+      },
+      onError: (msg) => {
+        console.warn('[Net]', msg);
+        netWaiting = false;
+        gameState = 'menu';
+        returnToMenu();
+      }
+    });
+    net.connectInternetGuest(opts.serverUrl);
   }
   // ADR-15: Spectator mode
   else if (mode === 'spectator') {
@@ -1554,6 +1676,8 @@ function returnToMenu() {
   units = []; buildings = []; resources = []; particles = []; commandIndicators = [];
   waitingOverlay.classList.add('hidden');
   placementMode = null;
+  // ADR-17: Close internet join panel
+  if (internetJoinPanel) internetJoinPanel.classList.add('hidden');
 
   // ADR-15: Restore HUD elements hidden during spectator mode
   if (btnBuildToggle) btnBuildToggle.style.display = '';
@@ -2635,6 +2759,15 @@ function update(dt, time) {
 
   // ADR-19: Update connection indicator
   updateConnectionIndicator();
+
+  // ADR-17: Update connection indicator to show WebRTC status
+  if (net && net.useWebrtc) {
+    const connType = net.getConnectionType();
+    if (connType === 'webrtc' && pingDot) {
+      pingDot.className = 'ping-dot excellent';
+      pingDot.title = 'Connected via WebRTC (peer-to-peer)';
+    }
+  }
 }
 
 /** ADR-19: Update the connection quality indicator in the HUD */
