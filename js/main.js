@@ -16,6 +16,9 @@ import { HUD } from './ui/hud.js';
 import { SFX } from './audio/sfx.js';
 import { Music } from './audio/music.js';
 import { NetworkClient } from './network/client.js';
+// ADR-16: Replay system
+import { ReplayRecorder, ReplayReplayer, saveReplay, loadReplay, listReplays, deleteReplay, downloadReplay, loadReplayFromFile } from './engine/replay.js';
+import { EVT_SELECT, EVT_BOX_SELECT, EVT_COMMAND, EVT_BUILD, EVT_UPGRADE, EVT_AI_SPAWN_UNIT, EVT_AI_SPAWN_BUILDING, EVT_AI_COMMAND, EVT_GAME_OVER } from './engine/replay.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 const MAP_SIZE = 96;
@@ -126,6 +129,22 @@ const hostIpDisplay = document.getElementById('host-ip-display');
 const btnCancelHost = document.getElementById('btn-cancel-host');
 const placementMenuEl = document.getElementById('placement-menu');
 
+// ADR-16: Replay UI elements
+const btnReplays = document.getElementById('btn-replays');
+const replayModal = document.getElementById('replay-modal');
+const btnCloseReplay = document.getElementById('btn-close-replay');
+const btnUploadReplay = document.getElementById('btn-upload-replay');
+const replayFileInput = document.getElementById('replay-file-input');
+const replayListItems = document.getElementById('replay-list-items');
+const replayControls = document.getElementById('replay-controls');
+const replayNameEl = document.getElementById('replay-name');
+const btnReplayRewind = document.getElementById('btn-replay-rewind');
+const btnReplayPause = document.getElementById('btn-replay-pause');
+const btnReplaySpeed = document.getElementById('btn-replay-speed');
+const btnReplayClose = document.getElementById('btn-replay-close');
+const replayProgressFill = document.getElementById('replay-progress-fill');
+const replayTimeEl = document.getElementById('replay-time');
+
 // ADR-12: Upgrade system state
 let upgradeStates = {
   weapon: { researched: false, researching: false, progress: 0, duration: 15 },
@@ -143,6 +162,16 @@ let gameSettings = {
 // ADR-14: Map selection
 let selectedMapId = 'default';
 let currentMapDef = getDefaultMap();
+
+// ADR-16: Replay system
+let replayRecorder = null;       // ReplayRecorder instance
+let replayReplayer = null;       // ReplayReplayer instance
+let replayTick = 0;              // Current replay tick counter
+let replayPaused = false;        // Replay paused
+let replaySpeed = 1;             // Replay speed multiplier (1, 2, 4, 0.5)
+let replaySnapshotTimer = 0;     // Timer for periodic snapshots
+const REPLAY_SNAPSHOT_INTERVAL = 30; // seconds between snapshots
+let replayRecording = false;     // Whether currently recording
 
 // Load saved settings from localStorage
 function loadSettings() {
@@ -195,6 +224,8 @@ function init() {
   buildScene();
   setupMenuEvents();
   setupSaveLoadEvents();
+  // ADR-16: Setup replay events
+  setupReplayEvents();
   window.addEventListener('resize', onResize);
 
   // Produce unit event
@@ -503,6 +534,14 @@ function setupMenuEvents() {
       saveSettings();
     });
   }
+
+  // ADR-16: Replay button (main menu)
+  if (btnReplays) {
+    btnReplays.addEventListener('click', () => {
+      renderReplayList();
+      replayModal.classList.remove('hidden');
+    });
+  }
 }
 
 /** ADR-13: Apply volume settings to audio system */
@@ -759,6 +798,342 @@ function applySaveState(state) {
   fogEnemy = new FogOfWar(MAP_SIZE, 1);
 }
 
+// ── ADR-16: Replay System ──────────────────────────────────────────────
+
+/** Setup replay button event handlers */
+function setupReplayEvents() {
+  // Close replay modal
+  if (btnCloseReplay) {
+    btnCloseReplay.addEventListener('click', () => {
+      replayModal.classList.add('hidden');
+    });
+  }
+
+  // Upload replay from file
+  if (btnUploadReplay) {
+    btnUploadReplay.addEventListener('click', () => {
+      replayFileInput.click();
+    });
+  }
+
+  // File input change
+  if (replayFileInput) {
+    replayFileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const data = await loadReplayFromFile(file);
+      if (data) {
+        const name = file.name.replace('.replay.json', '').replace('.json', '');
+        saveReplay(data, name);
+        renderReplayList();
+      } else {
+        alert('Invalid replay file');
+      }
+      replayFileInput.value = '';
+    });
+  }
+
+  // Replay controls
+  if (btnReplayRewind) {
+    btnReplayRewind.addEventListener('click', () => {
+      rewindReplay();
+    });
+  }
+
+  if (btnReplayPause) {
+    btnReplayPause.addEventListener('click', () => {
+      replayPaused = !replayPaused;
+      btnReplayPause.textContent = replayPaused ? '▶' : '⏸';
+    });
+  }
+
+  if (btnReplaySpeed) {
+    btnReplaySpeed.addEventListener('click', () => {
+      const speeds = [0.5, 1, 2, 4];
+      const idx = speeds.indexOf(replaySpeed);
+      replaySpeed = speeds[(idx + 1) % speeds.length];
+      btnReplaySpeed.textContent = `${replaySpeed}x`;
+    });
+  }
+
+  if (btnReplayClose) {
+    btnReplayClose.addEventListener('click', () => {
+      endReplay();
+    });
+  }
+}
+
+/** Render the replay list modal */
+function renderReplayList() {
+  if (!replayListItems) return;
+  const replays = listReplays();
+  replayListItems.innerHTML = '';
+
+  if (replays.replays.length === 0) {
+    replayListItems.innerHTML = '<div class="no-saves">No replays found. Record a game first!</div>';
+    return;
+  }
+
+  // Sort by date (newest first)
+  const sorted = [...replays.replays].sort((a, b) => b.createdAt - a.createdAt);
+
+  for (const entry of sorted) {
+    const div = document.createElement('div');
+    div.className = 'save-item';
+
+    const info = document.createElement('div');
+    info.className = 'save-item-info';
+
+    const label = document.createElement('span');
+    label.className = 'save-item-label';
+    label.textContent = entry.name || `Replay ${entry.replayId.slice(0, 12)}`;
+
+    const time = document.createElement('span');
+    time.className = 'save-item-time';
+    const d = new Date(entry.createdAt);
+    time.textContent = d.toLocaleString();
+
+    const faction = document.createElement('span');
+    faction.className = 'save-item-faction';
+    const mode = entry.settings ? entry.settings.mode || 'skirmish' : 'skirmish';
+    const factionName = entry.settings ? (entry.settings.faction || 'Unknown') : 'Unknown';
+    const winner = entry.winner !== null && entry.winner !== undefined
+      ? (entry.winner === 0 ? '🏆 Victory' : '💀 Defeat')
+      : '⏱️ Incomplete';
+    faction.textContent = `${factionName} (${mode}) — ${formatReplayDuration(entry.duration)} ${winner}`;
+
+    info.appendChild(label);
+    info.appendChild(time);
+    info.appendChild(faction);
+
+    const actions = document.createElement('div');
+    actions.className = 'save-item-actions';
+
+    // Watch button
+    const watchBtn = document.createElement('button');
+    watchBtn.className = 'load-btn';
+    watchBtn.textContent = 'Watch';
+    watchBtn.addEventListener('click', () => {
+      const data = loadReplay(entry.replayId);
+      if (data) {
+        replayModal.classList.add('hidden');
+        startReplay(data, entry.name);
+      }
+    });
+
+    // Download button
+    const dlBtn = document.createElement('button');
+    dlBtn.textContent = '⬇';
+    dlBtn.title = 'Download';
+    dlBtn.addEventListener('click', () => {
+      downloadReplay(entry.replayId);
+    });
+
+    // Delete button
+    const delBtn = document.createElement('button');
+    delBtn.className = 'delete-btn';
+    delBtn.textContent = 'Del';
+    delBtn.addEventListener('click', () => {
+      deleteReplay(entry.replayId);
+      renderReplayList();
+    });
+
+    actions.appendChild(watchBtn);
+    actions.appendChild(dlBtn);
+    actions.appendChild(delBtn);
+
+    div.appendChild(info);
+    div.appendChild(actions);
+    replayListItems.appendChild(div);
+  }
+}
+
+/** Format replay duration in seconds to mm:ss */
+function formatReplayDuration(seconds) {
+  if (!seconds || seconds < 0) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/** Start a replay session */
+function startReplay(replayData, name) {
+  // Stop any existing game
+  if (ai) ai = null;
+  if (net) { net.disconnect(); net = null; }
+  for (const u of units) if (u.mesh) scene.remove(u.mesh);
+  for (const b of buildings) if (b.mesh) scene.remove(b.mesh);
+  for (const r of resources) if (r.mesh) scene.remove(r.mesh);
+  units = []; buildings = []; resources = []; particles = [];
+  commandIndicators = [];
+  pathGrid.blocked.clear();
+  if (pathGrid.dynamicBlocked) pathGrid.dynamicBlocked.clear();
+
+  // Init audio
+  sfx.init();
+  music.init();
+  music.start();
+  applyVolumeSettings();
+
+  // Setup replayer
+  replayReplayer = new ReplayReplayer(replayData);
+  replayTick = 0;
+  replayPaused = false;
+  replaySpeed = 1;
+  replayRecorder = null;
+  replayRecording = false;
+
+  // Show UI
+  mainMenuEl.classList.add('hidden');
+  hudEl.classList.remove('hidden');
+  gameOverEl.classList.add('hidden');
+
+  // Create HUD
+  hud = new HUD();
+
+  // Setup replayer
+  replayReplayer = new ReplayReplayer(replayData);
+  replayTick = 0;
+  replayPaused = false;
+  replaySpeed = 1;
+  btnReplayPause.textContent = '⏸';
+  btnReplaySpeed.textContent = '1x';
+
+  // Show replay controls, hide interactive buttons
+  replayControls.classList.remove('hidden');
+  if (replayNameEl) replayNameEl.textContent = name || 'Replay';
+
+  // Hide interactive buttons (spectator-like)
+  disableInteractiveHUD();
+  spectatingBanner.classList.remove('hidden');
+  spectatingBanner.textContent = '📼 REPLAY';
+
+  // Get initial settings
+  const settings = replayReplayer.getInitialSettings();
+  if (settings) {
+    selectedMapId = settings.mapId || 'default';
+    playerFactionKey = settings.factionKey || 'dogs';
+    playerFaction = getFaction(playerFactionKey);
+  }
+
+  // Load initial state from snapshot
+  const initialState = replayReplayer.getInitialSnapshot();
+  if (initialState) {
+    // Minimal setup - just set up the map and fog
+    currentMapDef = getMap(selectedMapId);
+
+    // Apply initial state
+    applySaveState(initialState);
+
+    // Center camera
+    const playerCC = buildings.find(b => b.team === 0 && b.type === 'command_center' && b.alive);
+    if (playerCC) {
+      camera.setLookTarget(new THREE.Vector3(playerCC.x, 0, playerCC.z));
+    }
+  } else {
+    // Fallback: set up from scratch
+    startGameFromReplaySettings(settings || {});
+  }
+
+  gameMode = 'replay';
+  gameState = 'playing';
+}
+
+/** Minimal game setup for replay when no initial snapshot */
+function startGameFromReplaySettings(settings) {
+  currentMapDef = getMap(settings.mapId || 'default');
+  playerFactionKey = settings.factionKey || 'dogs';
+  playerFaction = getFaction(playerFactionKey);
+
+  // Set up resources from map
+  resources = generateResourcesFromMap(currentMapDef, TILE_SIZE, WORLD_HALF);
+  for (const r of resources) {
+    const node = new ResourceNode(r.type, r.x, r.z, r.amount);
+    resources[resources.length - 1] = node;
+    const mesh = node.createMesh();
+    scene.add(mesh);
+    const g = worldToGrid(r.x, r.z, TILE_SIZE, WORLD_HALF);
+    pathGrid.blocked.add(`${g.x},${g.y}`);
+  }
+
+  // Place bases
+  const playerBaseX = currentMapDef.playerBase[0];
+  const playerBaseZ = currentMapDef.playerBase[1];
+  spawnBuilding('command_center', playerFactionKey, playerBaseX, playerBaseZ, 0);
+  const enemyBaseX = currentMapDef.enemyBase[0];
+  const enemyBaseZ = currentMapDef.enemyBase[1];
+  spawnBuilding('command_center', playerFactionKey, enemyBaseX, enemyBaseZ, 1);
+
+  camera.setLookTarget(new THREE.Vector3(playerBaseX, 0, playerBaseZ));
+  playerDiamonds = 300;
+  playerBiogas = 0;
+}
+
+/** Rewind replay to the beginning */
+function rewindReplay() {
+  if (!replayReplayer) return;
+  // Re-start the replay
+  const data = replayReplayer.replay;
+  startReplay(data, replayNameEl ? replayNameEl.textContent : 'Replay');
+}
+
+/** End replay and return to menu */
+function endReplay() {
+  replayReplayer = null;
+  replayRecorder = null;
+  replayRecording = false;
+  replayControls.classList.add('hidden');
+  spectatingBanner.classList.add('hidden');
+  // Restore interactive buttons
+  if (btnBuildToggle) btnBuildToggle.style.display = '';
+  if (btnUpgrades) btnUpgrades.style.display = '';
+  if (btnSaveGame) btnSaveGame.style.display = '';
+  if (btnLoadGame) btnLoadGame.style.display = '';
+  returnToMenu();
+}
+
+/** Record a player input event for replay */
+function recordPlayerInput(type, data) {
+  if (replayRecorder && replayRecording) {
+    replayRecorder.recordPlayerInput(type, data);
+  }
+}
+
+/** Record an AI event for replay */
+function recordAiEvent(type, data) {
+  if (replayRecorder && replayRecording) {
+    replayRecorder.recordAiEvent(type, data);
+  }
+}
+
+/** Process replay events for the current tick */
+function processReplayEvents() {
+  if (!replayReplayer || replayPaused) return;
+
+  const events = replayReplayer.getEventsForTick();
+  for (const evt of events) {
+    if (evt.type === EVT_GAME_OVER && evt.data.winner !== undefined) {
+      endGame(evt.data.winner === 0);
+    }
+    // Other events are processed during the simulation
+    // (player inputs are replayed by re-running the tick with those inputs)
+  }
+}
+
+/** Update replay UI (progress bar, time display) */
+function updateReplayUI() {
+  if (!replayReplayer) return;
+  const meta = replayReplayer.getMetadata();
+  const totalTicks = meta.winnerTick || Math.max(replayTick, 60 * (meta.duration || 1));
+  const progress = Math.min(100, (replayTick / totalTicks) * 100);
+  if (replayProgressFill) replayProgressFill.style.width = `${progress}%`;
+  if (replayTimeEl) {
+    const current = formatReplayDuration(replayTick / 60);
+    const total = formatReplayDuration(meta.duration || 0);
+    replayTimeEl.textContent = `${current} / ${total}`;
+  }
+}
+
 // ── ADR-15: Disable interactive HUD for spectator mode ──────────────
 function disableInteractiveHUD() {
   // Hide build-related buttons
@@ -799,6 +1174,13 @@ function startGame(mode, opts = {}) {
   placementMode = null;
   netPreviousState = null;
   netBroadcastTimer = 0;
+  // ADR-16: Reset replay state
+  replayRecorder = new ReplayRecorder();
+  replayTick = 0;
+  replayRecording = (mode === 'skirmish' || mode === 'host');
+  replaySnapshotTimer = 0;
+  replayReplayer = null;
+  replayControls.classList.add('hidden');
   // ADR-12: Reset upgrades
   upgradeStates = {
     weapon: { researched: false, researching: false, progress: 0, duration: 15 },
@@ -849,6 +1231,23 @@ function startGame(mode, opts = {}) {
 
   // Center camera on player base
   camera.setLookTarget(new THREE.Vector3(playerBaseX, 0, playerBaseZ));
+
+  // ADR-16: Start recording for skirmish and host modes
+  if (replayRecording && replayRecorder) {
+    replayRecorder.start({
+      faction: playerFaction.name || playerFactionKey,
+      factionKey: playerFactionKey,
+      mapId: selectedMapId,
+      mode: mode,
+      difficulty: gameSettings.difficulty
+    }, {
+      units, buildings, resources,
+      playerDiamonds, playerBiogas,
+      upgradeStates,
+      mapId: selectedMapId,
+      mode
+    });
+  }
 
   // ── Mode-specific setup ──
   if (mode === 'skirmish') {
@@ -1167,6 +1566,12 @@ function returnToMenu() {
   if (unitInfoEl) unitInfoEl.style.display = '';
   if (spectatingBanner) spectatingBanner.classList.add('hidden');
 
+  // ADR-16: Clean up replay state
+  replayRecording = false;
+  replayRecorder = null;
+  replayReplayer = null;
+  replayControls.classList.add('hidden');
+
   // Reset faction UI
   factionButtons.forEach(b => b.classList.remove('selected'));
   btnSkirmish.disabled = true;
@@ -1187,6 +1592,20 @@ function returnToMenu() {
 }
 
 function endGame(victory) {
+  // ADR-16: Stop recording and save replay
+  if (replayRecording && replayRecorder) {
+    replayRecorder.recordGameOver(victory ? 0 : 1);
+    const replayData = replayRecorder.stop();
+    replayRecording = false;
+    // Save replay with a descriptive name
+    const factionName = playerFaction.name || playerFactionKey;
+    const result = victory ? 'Victory' : 'Defeat';
+    const mapName = selectedMapId || 'default';
+    const replayName = `${factionName} - ${result} on ${mapName}`;
+    saveReplay(replayData, replayName);
+    console.log(`[Replay] Saved: ${replayName} (${replayData.events.length} events, ${replayData.duration.toFixed(1)}s)`);
+  }
+
   // Disconnect network
   if (net) { net.disconnect(); net = null; }
   netWaiting = false;
@@ -1219,6 +1638,10 @@ function spawnUnit(type, faction, x, z, team) {
   const mesh = unit.createMesh(factionDef);
   scene.add(mesh);
   units.push(unit);
+  // ADR-16: Record AI unit spawns
+  if (team === 1 && replayRecording) {
+    recordAiEvent(EVT_AI_SPAWN_UNIT, { type, faction, x: Math.round(x), z: Math.round(z) });
+  }
   return unit;
 }
 
@@ -1229,6 +1652,10 @@ function spawnBuilding(type, faction, x, z, team) {
   const building = new Building(type, faction, x, z, team);
   building.setStats(buildDef || {});
   building.factionDef = factionDef;
+  // ADR-16: Record AI building spawns
+  if (team === 1 && replayRecording) {
+    recordAiEvent(EVT_AI_SPAWN_BUILDING, { type, faction, x: Math.round(x), z: Math.round(z) });
+  }
   const mesh = building.createMesh(factionDef);
   scene.add(mesh);
   buildings.push(building);
@@ -1372,6 +1799,8 @@ function tryPlaceBuilding(x, z) {
 
   // Spawn the real building
   spawnBuilding(placementMode.type, playerFactionKey, x, z, 0);
+  // ADR-16: Record building placement
+  recordPlayerInput(EVT_BUILD, { type: placementMode.type, x, z });
   sfx.play('build');
 
   // Exit placement mode
@@ -1434,6 +1863,8 @@ function onResearchUpgrade(e) {
   state.researching = true;
   state.progress = 0;
   sfx.play('build');
+  // ADR-16: Record upgrade research
+  recordPlayerInput(EVT_UPGRADE, { type });
 
   hud.addChatMessage('System', `Researching ${type} upgrade...`);
 }
@@ -1699,22 +2130,146 @@ function handleInput() {
   // Left click — select
   if (leftClick && leftClick.world) {
     processSelection(leftClick.world.x, leftClick.world.z);
+    // ADR-16: Record player select
+    recordPlayerInput(EVT_SELECT, { x: leftClick.world.x, z: leftClick.world.z });
   }
 
   // Selection box
   if (selBox && !placementMode) {
     processBoxSelection(selBox.min.x, selBox.min.z, selBox.max.x, selBox.max.z);
+    // ADR-16: Record player box select
+    recordPlayerInput(EVT_BOX_SELECT, { minX: selBox.min.x, minZ: selBox.min.z, maxX: selBox.max.x, maxZ: selBox.max.z });
   }
 
   // Right click — move / attack / gather
   if (rightClick && rightClick.world && !placementMode) {
     processCommand(rightClick.world.x, rightClick.world.z);
+    // ADR-16: Record player command
+    recordPlayerInput(EVT_COMMAND, { x: rightClick.world.x, z: rightClick.world.z });
   }
+}
+
+// ── ADR-16: Visuals-only update for replay mode ────────────────────────
+/** Update only visual elements (health bars, mesh sync, fog) without simulation */
+function updateVisualsOnly() {
+  clockTime = clock.getElapsedTime();
+
+  // Update units visuals
+  for (const u of units) {
+    if (!u.alive) {
+      u.deathTimer -= 1/60;
+      if (u.deathTimer <= 0 && u.mesh) scene.remove(u.mesh);
+      continue;
+    }
+    u.updateHealthBar();
+    u.syncMesh(clockTime);
+    u.billboardBars(camera.camera);
+  }
+
+  // Update buildings visuals
+  for (const b of buildings) {
+    if (!b.alive) {
+      b.deathTimer -= 1/60;
+      if (b.deathTimer <= 0 && b.mesh) scene.remove(b.mesh);
+      continue;
+    }
+    b.updateHealthBar();
+    b.syncMesh();
+    b.billboardBars(camera.camera);
+  }
+
+  // Update resources visuals
+  for (const r of resources) r.syncMesh();
+
+  // Fog of war
+  fogPlayer.tick();
+  for (const u of units) {
+    if (!u.alive) continue;
+    const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
+    const sightTiles = Math.floor(u.sightRange / TILE_SIZE);
+    if (u.team === 0) fogPlayer.reveal(g.x, g.y, sightTiles);
+    else fogEnemy.reveal(g.x, g.y, sightTiles);
+  }
+  for (const b of buildings) {
+    if (!b.alive) continue;
+    const g = worldToGrid(b.x, b.z, TILE_SIZE, WORLD_HALF);
+    const sightTiles = Math.floor(b.sightRange / TILE_SIZE);
+    if (b.team === 0) fogPlayer.reveal(g.x, g.y, sightTiles);
+    else fogEnemy.reveal(g.x, g.y, sightTiles);
+  }
+
+  // ADR-2: Apply fog visibility
+  for (const u of units) {
+    if (!u.alive || u.mesh === null) continue;
+    if (u.team !== 0) {
+      const g = worldToGrid(u.x, u.z, TILE_SIZE, WORLD_HALF);
+      const visible = fogPlayer.isVisible(g.x, g.y);
+      u.mesh.visible = visible;
+      if (u.selectionRing && u.selected) u.selectionRing.visible = true;
+    }
+  }
+  for (const b of buildings) {
+    if (!b.alive || b.mesh === null) continue;
+    if (b.team !== 0) {
+      const g = worldToGrid(b.x, b.z, TILE_SIZE, WORLD_HALF);
+      const visible = fogPlayer.isVisible(g.x, g.y);
+      b.mesh.visible = visible;
+      if (b.selectionRing && b.selected) b.selectionRing.visible = true;
+    }
+  }
+
+  // Remove dead entities
+  units = units.filter(u => u.alive || u.deathTimer > 0);
+  buildings = buildings.filter(b => b.alive || b.deathTimer > 0);
+
+  // HUD
+  hud.updateResources(playerDiamonds, playerBiogas);
+  const fogData = fogPlayer.getMinimapData([60, 100, 60], [40, 60, 40], [0, 0, 0]);
+  hud.updateMinimap(fogData, units, buildings, 0);
 }
 
 // ── Update ─────────────────────────────────────────────────────────────
 function update(dt, time) {
+  // ADR-16: Replay mode — skip simulation, inject events and advance
+  if (gameMode === 'replay') {
+    if (!replayPaused && replayReplayer) {
+      const speedDt = dt * replaySpeed;
+      // Advance tick by speedDt * 60 ticks
+      const ticksToAdd = Math.floor(speedDt * 60);
+      for (let i = 0; i < ticksToAdd; i++) {
+        processReplayEvents();
+        replayReplayer.advanceTick();
+        replayTick = replayReplayer.currentTick;
+      }
+      // Check if replay finished
+      if (replayReplayer.isFinished() && replayPaused === false) {
+        replayPaused = true;
+        if (btnReplayPause) btnReplayPause.textContent = '▶';
+      }
+    }
+    updateReplayUI();
+    // Still update visuals
+    updateVisualsOnly();
+    return;
+  }
+
   handleInput();
+
+  // ADR-16: Advance replay tick and record snapshots
+  if (replayRecording && replayRecorder) {
+    replayRecorder.advanceTick();
+    replaySnapshotTimer += dt;
+    if (replaySnapshotTimer >= REPLAY_SNAPSHOT_INTERVAL) {
+      replaySnapshotTimer = 0;
+      replayRecorder.recordSnapshot({
+        units, buildings, resources,
+        playerDiamonds, playerBiogas,
+        upgradeStates,
+        mapId: selectedMapId,
+        mode: gameMode
+      });
+    }
+  }
 
   // ADR-8: Update shared clock time for unit animations
   clockTime = clock.getElapsedTime();

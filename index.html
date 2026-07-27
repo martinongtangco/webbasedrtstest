@@ -34,6 +34,8 @@
       <button id="btn-join" class="menu-btn">Join LAN Game</button>
       <!-- ADR-15: Spectate button -->
       <button id="btn-spectate" class="menu-btn">Spectate Game</button>
+      <!-- ADR-16: Replay button -->
+      <button id="btn-replays" class="menu-btn">📼 Watch Replay</button>
       <button id="btn-settings" class="menu-btn small">⚙️ Settings</button>
     </div>
     <div id="join-panel" class="join-panel hidden">
@@ -83,6 +85,24 @@
 
     <!-- ADR-12: Upgrade Panel -->
     <div id="upgrade-panel" class="upgrade-panel hidden"></div>
+
+    <!-- ADR-16: Replay Control Bar -->
+    <div id="replay-controls" class="replay-controls hidden">
+      <div id="replay-info" class="replay-info">
+        <span class="replay-label">📼 REPLAY</span>
+        <span id="replay-name" class="replay-name"></span>
+      </div>
+      <div class="replay-buttons">
+        <button id="btn-replay-rewind" class="replay-btn" title="Rewind">⏮</button>
+        <button id="btn-replay-pause" class="replay-btn" title="Pause">⏸</button>
+        <button id="btn-replay-speed" class="replay-btn" title="Speed: 1x">1x</button>
+        <button id="btn-replay-close" class="replay-btn" title="Exit Replay">✖</button>
+      </div>
+      <div id="replay-progress" class="replay-progress">
+        <div id="replay-progress-fill" class="replay-progress-fill"></div>
+      </div>
+      <span id="replay-time" class="replay-time">0:00 / 0:00</span>
+    </div>
   </div>
 
   <!-- Waiting for Opponent Overlay -->
@@ -118,6 +138,24 @@
       </div>
       <div class="settings-buttons">
         <button id="btn-close-save-load" class="menu-btn small">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADR-16: Replay List Modal -->
+  <div id="replay-modal" class="settings-modal hidden">
+    <div class="settings-content">
+      <h2>📼 Replay Library</h2>
+      <div class="save-buttons">
+        <button id="btn-upload-replay" class="menu-btn small">Upload Replay</button>
+        <input type="file" id="replay-file-input" accept=".json" class="hidden">
+      </div>
+      <div id="replay-list" class="save-list">
+        <h3>Saved Replays</h3>
+        <div id="replay-list-items"></div>
+      </div>
+      <div class="settings-buttons">
+        <button id="btn-close-replay" class="menu-btn small">Close</button>
       </div>
     </div>
   </div>

@@ -915,3 +915,86 @@ body {
   justify-content: center;
   margin-top: 24px;
 }
+
+/* ═══════════════════════════════════════════════════════ */
+/* ADR-16: Replay Controls                                */
+/* ═══════════════════════════════════════════════════════ */
+
+.replay-controls {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(10, 10, 18, 0.9);
+  border: 1px solid #2a2a4a;
+  border-radius: 4px;
+  min-width: 400px;
+}
+
+.replay-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+}
+
+.replay-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #ffaa00;
+  letter-spacing: 0.15em;
+}
+
+.replay-name {
+  font-size: 0.8rem;
+  color: #e0e0e0;
+  font-weight: 600;
+}
+
+.replay-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.replay-btn {
+  padding: 4px 10px;
+  background: #1a1a2e;
+  border: 1px solid #3a3a5a;
+  border-radius: 3px;
+  color: #ccc;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.replay-btn:hover {
+  border-color: #ffaa00;
+  color: #ffaa00;
+}
+
+.replay-progress {
+  flex: 1;
+  height: 6px;
+  background: #1a1a2e;
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.replay-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffaa00, #ff6644);
+  transition: width 0.3s linear;
+  width: 0%;
+}
+
+.replay-time {
+  font-size: 0.75rem;
+  color: #889;
+  font-weight: 600;
+  min-width: 70px;
+  text-align: right;
+}

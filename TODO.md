@@ -34,7 +34,6 @@ Tasks not yet started. Move to **In Progress** when work begins.
 
 ### 🟢 Low Priority — Nice-to-Have
 
-- [ ] **ADR-16 — Replay system** — Record game events and replay later. New module.
 - [ ] **ADR-17 — NAT traversal (WebRTC)** — Enable play across different networks, not just LAN. `server.js`, `js/network/client.js`
 
 ---
@@ -49,7 +48,6 @@ Tasks currently being worked on. *(empty)*
 
 Tasks that depend on other work being completed first.
 
-- [ ] **ADR-16 — Replay system** — Blocked on: event recording infrastructure, deterministic simulation
 - [ ] **ADR-17 — NAT traversal** — Blocked on: core LAN multiplayer needs to be rock-solid first
 
 ---
@@ -58,6 +56,7 @@ Tasks that depend on other work being completed first.
 
 Completed tasks. Move here from Backlog or In Progress when finished.
 
+- [x] **ADR-16 — Replay system** — Event recording + periodic checkpoint replay. Records player inputs (select, box-select, command, build, upgrade) and AI events (spawn unit/building, commands) with tick timestamps. Periodic snapshots every 30s for drift correction. Replay playback with pause/resume, speed control (0.5x, 1x, 2x, 4x), rewind, progress bar. Replay library modal with list, watch, download, upload, delete. Replays saved to localStorage as JSON, exportable/importable as files. Seeded PRNG (mulberry32) for deterministic replay. 108 tests. `js/engine/replay.js`, `js/main.js`, `index.html`, `style.css`, `tests/test_adr16_replay.js`
 - [x] **ADR-1 — Guest input integrated into host simulation** — Added `onPlayerInput` callback to NetworkClient host config; host now calls `processSelection`/`processBoxSelection`/`processCommand` for guest inputs. Refactored `handleInput()` into reusable functions. `js/network/client.js`, `js/main.js`
 - [x] **ADR-2 — Fog of war visually applied** — Enemy units/buildings now have `mesh.visible` toggled based on `fogPlayer.isVisible()` at their grid position after fog tick+reveal. `js/main.js`
 - [x] **ADR-3 — Shoot/explosion SFX triggered** — `unit_shoot` custom event dispatched in `Unit.updateCombat()` when firing, listened in `main.js` to play `sfx.play('shoot')`. `wasAlive` tracking for units and buildings; `sfx.play('explosion')` when `wasAlive && !alive`. `js/entities/units.js`, `js/main.js`
