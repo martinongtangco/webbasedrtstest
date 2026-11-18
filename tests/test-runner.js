@@ -9,6 +9,7 @@
 import { readFileSync, readdirSync } from 'fs';
 import { join, dirname, posix } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import { spawnSync } from 'child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -63,6 +64,19 @@ const testFiles = readdirSync(__dirname).filter(f => f.startsWith('test_') && f.
 
 for (const file of testFiles) {
   const path = join(__dirname, file);
+  // Files without a default export run their own assertions on load (some inside
+  // timers), so run them as a separate process and use the exit code.
+  if (!/^export default/m.test(readFileSync(path, 'utf8'))) {
+    const { status } = spawnSync(process.execPath, [path], { stdio: 'inherit' });
+    totalTests++;
+    if (status === 0) {
+      passedTests++;
+    } else {
+      failedTests++;
+      failures.push({ suite: file, test: '(standalone file)', error: `exited with code ${status}` });
+    }
+    continue;
+  }
   try {
     const mod = await import(pathToFileURL(path).href);
     if (typeof mod.default === 'function') {
