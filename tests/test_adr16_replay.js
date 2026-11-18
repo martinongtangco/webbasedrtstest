@@ -438,4 +438,5 @@ console.log('\n[10] Recorder Edge Cases');
 // ── Summary ────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(40)}`);
 console.log(`Results: ${testsPassed} passed, ${testsFailed} failed`);
+if (testsFailed > 0) process.exitCode = 1;
 console.log(`${'─'.repeat(40)}\n`);

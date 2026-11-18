@@ -413,5 +413,6 @@ console.log('\n[15] Bidirectional Candidate Exchange');
 setTimeout(function() {
   console.log('\n' + '-'.repeat(40));
   console.log('Results: ' + testsPassed + ' passed, ' + testsFailed + ' failed');
+  if (testsFailed > 0) process.exitCode = 1;
   console.log('-'.repeat(40) + '\n');
 }, 200);

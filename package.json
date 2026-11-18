@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test": "node tests/test-runner.js"
+  },
   "dependencies": {
     "ws": "^8.21.1"
   }
